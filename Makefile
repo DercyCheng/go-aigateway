@@ -21,7 +21,8 @@ help: ## Show this help message
 # Development targets
 build: ## Build the application
 	@echo "Building $(APP_NAME)..."
-	@CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -a -installsuffix cgo -o bin/$(APP_NAME) .
+	@mkdir -p build/
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -a -installsuffix cgo -o build/$(APP_NAME) .
 
 run: ## Run the application locally
 	@echo "Running $(APP_NAME)..."
@@ -33,7 +34,7 @@ test: ## Run tests
 
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
-	@rm -rf bin/
+	@rm -rf build/
 	@docker rmi $(DOCKER_IMAGE) $(DOCKER_IMAGE_LATEST) 2>/dev/null || true
 
 # Dependencies
@@ -45,7 +46,7 @@ deps: ## Download dependencies
 # Docker targets
 docker-build: ## Build Docker image
 	@echo "Building Docker image..."
-	@docker build -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE_LATEST) .
+	@docker build -f deployments/Dockerfile -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE_LATEST) .
 
 docker-run: ## Run Docker container
 	@echo "Running Docker container..."
@@ -59,23 +60,23 @@ docker-push: docker-build ## Push Docker image to registry
 # Docker Compose targets
 compose-up: ## Start services with Docker Compose
 	@echo "Starting services with Docker Compose..."
-	@docker-compose up -d
+	@docker-compose -f deployments/docker-compose.yml up -d
 
 compose-down: ## Stop services with Docker Compose
 	@echo "Stopping services with Docker Compose..."
-	@docker-compose down
+	@docker-compose -f deployments/docker-compose.yml down
 
 compose-logs: ## View Docker Compose logs
-	@docker-compose logs -f
+	@docker-compose -f deployments/docker-compose.yml logs -f
 
 # Kubernetes targets
 k8s-deploy: ## Deploy to Kubernetes
 	@echo "Deploying to Kubernetes..."
-	@kubectl apply -f k8s-deployment.yaml
+	@kubectl apply -f deployments/k8s-deployment.yaml
 
 k8s-delete: ## Delete from Kubernetes
 	@echo "Deleting from Kubernetes..."
-	@kubectl delete -f k8s-deployment.yaml
+	@kubectl delete -f deployments/k8s-deployment.yaml
 
 k8s-status: ## Check Kubernetes deployment status
 	@echo "Checking Kubernetes status..."
