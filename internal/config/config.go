@@ -18,6 +18,9 @@ type Config struct {
 	RateLimit   int
 	HealthCheck bool
 
+	// Redis Configuration
+	Redis RedisConfig
+
 	// Service Discovery
 	ServiceDiscovery ServiceDiscoveryConfig
 
@@ -29,6 +32,12 @@ type Config struct {
 
 	// Cloud Integration
 	CloudIntegration CloudIntegrationConfig
+
+	// Auto Scaling
+	AutoScaling AutoScalingConfig
+
+	// Monitoring
+	Monitoring MonitoringConfig
 }
 
 type ServiceDiscoveryConfig struct {
@@ -37,6 +46,30 @@ type ServiceDiscoveryConfig struct {
 	Endpoints   []string
 	Namespace   string
 	RefreshRate time.Duration
+}
+
+type RedisConfig struct {
+	Enabled  bool
+	Addr     string
+	Password string
+	DB       int
+	PoolSize int
+}
+
+type AutoScalingConfig struct {
+	Enabled           bool
+	MinReplicas       int
+	MaxReplicas       int
+	TargetCPU         float64
+	TargetQPS         int
+	ScaleUpCooldown   time.Duration
+	ScaleDownCooldown time.Duration
+}
+
+type MonitoringConfig struct {
+	Enabled          bool
+	AlertsEnabled    bool
+	MetricsRetention time.Duration
 }
 
 type ProtocolConversionConfig struct {
@@ -82,6 +115,14 @@ func New() *Config {
 		RateLimit:   getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
 		HealthCheck: getEnvBool("HEALTH_CHECK_ENABLED", true),
 
+		Redis: RedisConfig{
+			Enabled:  getEnvBool("REDIS_ENABLED", true),
+			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvInt("REDIS_DB", 0),
+			PoolSize: getEnvInt("REDIS_POOL_SIZE", 10),
+		},
+
 		ServiceDiscovery: ServiceDiscoveryConfig{
 			Enabled:     getEnvBool("SERVICE_DISCOVERY_ENABLED", false),
 			Type:        getEnv("SERVICE_DISCOVERY_TYPE", "consul"),
@@ -118,6 +159,22 @@ func New() *Config {
 			},
 			Services: strings.Split(getEnv("CLOUD_SERVICES", "ecs,rds,oss"), ","),
 		},
+
+		AutoScaling: AutoScalingConfig{
+			Enabled:           getEnvBool("AUTO_SCALING_ENABLED", false),
+			MinReplicas:       getEnvInt("AUTO_SCALING_MIN_REPLICAS", 1),
+			MaxReplicas:       getEnvInt("AUTO_SCALING_MAX_REPLICAS", 10),
+			TargetCPU:         getEnvFloat("AUTO_SCALING_TARGET_CPU", 70.0),
+			TargetQPS:         getEnvInt("AUTO_SCALING_TARGET_QPS", 1000),
+			ScaleUpCooldown:   getEnvDuration("AUTO_SCALING_UP_COOLDOWN", 3*time.Minute),
+			ScaleDownCooldown: getEnvDuration("AUTO_SCALING_DOWN_COOLDOWN", 5*time.Minute),
+		},
+
+		Monitoring: MonitoringConfig{
+			Enabled:          getEnvBool("MONITORING_ENABLED", true),
+			AlertsEnabled:    getEnvBool("MONITORING_ALERTS_ENABLED", true),
+			MetricsRetention: getEnvDuration("MONITORING_METRICS_RETENTION", 24*time.Hour),
+		},
 	}
 }
 
@@ -150,6 +207,15 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
+		}
+	}
+	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatValue
 		}
 	}
 	return defaultValue

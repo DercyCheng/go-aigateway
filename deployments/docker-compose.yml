@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # Redis 服务
+  redis:
+    image: redis:7-alpine
+    container_name: ai-gateway-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
   # AI Gateway 主服务
   ai-gateway:
     build: .
@@ -46,10 +62,27 @@ services:
       - CLOUD_ACCESS_KEY_ID=${CLOUD_ACCESS_KEY_ID}
       - CLOUD_ACCESS_KEY_SECRET=${CLOUD_ACCESS_KEY_SECRET}
       - CLOUD_SERVICES=ecs,rds,oss
-      
-      # 数据库配置
-      - REDIS_URL=redis://redis:6379
+        # 数据库和缓存配置
+      - REDIS_ENABLED=true
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - REDIS_POOL_SIZE=10
       - POSTGRES_URL=postgres://postgres:password@postgres:5432/aigateway?sslmode=disable
+      
+      # 自动扩缩容配置
+      - AUTO_SCALING_ENABLED=true
+      - AUTO_SCALING_MIN_REPLICAS=1
+      - AUTO_SCALING_MAX_REPLICAS=5
+      - AUTO_SCALING_TARGET_CPU=70.0
+      - AUTO_SCALING_TARGET_QPS=1000
+      - AUTO_SCALING_UP_COOLDOWN=3m
+      - AUTO_SCALING_DOWN_COOLDOWN=5m
+      
+      # 监控配置
+      - MONITORING_ENABLED=true
+      - MONITORING_ALERTS_ENABLED=true
+      - MONITORING_METRICS_RETENTION=24h
     depends_on:
       - redis
       - postgres
@@ -62,23 +95,6 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-    networks:
-      - ai-gateway-network
-
-  # Redis 缓存服务
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
     networks:
       - ai-gateway-network
 
