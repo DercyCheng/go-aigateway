@@ -9,8 +9,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/sony/gobreaker v0.5.0
-	golang.org/x/time v0.5.0
 	google.golang.org/grpc v1.61.0
 )
 
