@@ -1,0 +1,128 @@
+{
+    "dashboard": {
+        "id": null,
+        "title": "AI Gateway Monitoring",
+        "tags": [
+            "ai-gateway",
+            "monitoring"
+        ],
+        "timezone": "browser",
+        "panels": [
+            {
+                "id": 1,
+                "title": "Request Rate",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "rate(http_requests_total[5m])",
+                        "legendFormat": "{{method}} {{endpoint}}"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 0
+                }
+            },
+            {
+                "id": 2,
+                "title": "Response Status Codes",
+                "type": "piechart",
+                "targets": [
+                    {
+                        "expr": "sum by (status) (rate(http_requests_total[5m]))",
+                        "legendFormat": "{{status}}"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 0
+                }
+            },
+            {
+                "id": 3,
+                "title": "Response Time",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+                        "legendFormat": "95th percentile"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))",
+                        "legendFormat": "50th percentile"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 24,
+                    "x": 0,
+                    "y": 8
+                }
+            },
+            {
+                "id": 4,
+                "title": "Rate Limit Hits",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "rate(rate_limit_hits_total[5m])",
+                        "legendFormat": "Rate Limit Hits/sec"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 16
+                }
+            },
+            {
+                "id": 5,
+                "title": "API Key Usage",
+                "type": "table",
+                "targets": [
+                    {
+                        "expr": "sum by (key_prefix) (rate(api_key_usage_total[1h]))",
+                        "legendFormat": "{{key_prefix}}"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 16
+                }
+            },
+            {
+                "id": 6,
+                "title": "Proxy Request Duration",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.95, rate(proxy_request_duration_seconds_bucket[5m]))",
+                        "legendFormat": "95th percentile - {{endpoint}}"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.50, rate(proxy_request_duration_seconds_bucket[5m]))",
+                        "legendFormat": "50th percentile - {{endpoint}}"
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 24,
+                    "x": 0,
+                    "y": 24
+                }
+            }
+        ],
+        "time": {
+            "from": "now-1h",
+            "to": "now"
+        },
+        "refresh": "5s"
+    }
+}

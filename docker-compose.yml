@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  ai-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - GIN_MODE=release
+      - TARGET_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+      - TARGET_API_KEY=${DASHSCOPE_API_KEY}
+      - GATEWAY_API_KEYS=${GATEWAY_API_KEYS}
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=60
+      - HEALTH_CHECK_ENABLED=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
