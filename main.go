@@ -8,13 +8,13 @@ import (
 	"syscall"
 	"time"
 
+	"go-aigateway/internal/cloud"
 	"go-aigateway/internal/config"
-	"go-aigateway/internal/middleware"
-	"go-aigateway/internal/router"
 	"go-aigateway/internal/discovery"
+	"go-aigateway/internal/middleware"
 	"go-aigateway/internal/protocol"
 	"go-aigateway/internal/ram"
-	"go-aigateway/internal/cloud"
+	"go-aigateway/internal/router"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -85,7 +85,7 @@ func main() {
 
 	// Setup routes
 	router.SetupRoutes(r, cfg)
-	
+
 	// Setup cloud management routes
 	router.SetupCloudRoutes(r, cloudIntegrator)
 
@@ -99,7 +99,7 @@ func main() {
 	}
 
 	logrus.WithField("port", port).Info("Starting AI Gateway server with advanced features")
-	
+
 	// Setup graceful shutdown
 	srv := &http.Server{
 		Addr:    ":" + port,

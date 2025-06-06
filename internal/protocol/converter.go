@@ -87,8 +87,8 @@ func (pc *ProtocolConverter) httpsToGRPC(ctx context.Context, req *ConversionReq
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"source": "https",
-		"target": "grpc",
+		"source":   "https",
+		"target":   "grpc",
 		"endpoint": req.Endpoint,
 	}).Info("Converting HTTPS to gRPC")
 
@@ -104,7 +104,9 @@ func (pc *ProtocolConverter) httpsToGRPC(ctx context.Context, req *ConversionReq
 
 	// TODO: Implement actual gRPC call based on service definition
 	// This is a placeholder implementation
-	
+	// For now, we just verify the connection is available
+	_ = conn
+
 	return &ConversionResponse{
 		StatusCode: 200,
 		Headers:    make(map[string]string),
@@ -115,8 +117,8 @@ func (pc *ProtocolConverter) httpsToGRPC(ctx context.Context, req *ConversionReq
 
 func (pc *ProtocolConverter) grpcToHTTPS(ctx context.Context, req *ConversionRequest) (*ConversionResponse, error) {
 	logrus.WithFields(logrus.Fields{
-		"source": "grpc",
-		"target": "https",
+		"source":   "grpc",
+		"target":   "https",
 		"endpoint": req.Endpoint,
 	}).Info("Converting gRPC to HTTPS")
 
@@ -186,27 +188,27 @@ func (pc *ProtocolConverter) grpcToHTTPS(ctx context.Context, req *ConversionReq
 
 func (pc *ProtocolConverter) httpToHTTPS(ctx context.Context, req *ConversionRequest) (*ConversionResponse, error) {
 	logrus.WithFields(logrus.Fields{
-		"source": "http",
-		"target": "https",
+		"source":   "http",
+		"target":   "https",
 		"endpoint": req.Endpoint,
 	}).Info("Converting HTTP to HTTPS")
 
 	// Convert HTTP URL to HTTPS
 	httpsURL := strings.Replace(req.Endpoint, "http://", "https://", 1)
-	
+
 	return pc.executeHTTPRequest(ctx, req.Method, httpsURL, req.Headers, req.Body)
 }
 
 func (pc *ProtocolConverter) httpsToHTTP(ctx context.Context, req *ConversionRequest) (*ConversionResponse, error) {
 	logrus.WithFields(logrus.Fields{
-		"source": "https",
-		"target": "http",
+		"source":   "https",
+		"target":   "http",
 		"endpoint": req.Endpoint,
 	}).Info("Converting HTTPS to HTTP")
 
 	// Convert HTTPS URL to HTTP
 	httpURL := strings.Replace(req.Endpoint, "https://", "http://", 1)
-	
+
 	return pc.executeHTTPRequest(ctx, req.Method, httpURL, req.Headers, req.Body)
 }
 

@@ -31,12 +31,12 @@ type CacheEntry struct {
 }
 
 type UserInfo struct {
-	UserID       string            `json:"user_id"`
-	UserName     string            `json:"user_name"`
-	Roles        []string          `json:"roles"`
-	Permissions  []string          `json:"permissions"`
-	Policies     []string          `json:"policies"`
-	Attributes   map[string]string `json:"attributes"`
+	UserID      string            `json:"user_id"`
+	UserName    string            `json:"user_name"`
+	Roles       []string          `json:"roles"`
+	Permissions []string          `json:"permissions"`
+	Policies    []string          `json:"policies"`
+	Attributes  map[string]string `json:"attributes"`
 }
 
 type AuthRequest struct {
@@ -125,23 +125,23 @@ func (ra *RAMAuthenticator) Authenticate(ctx context.Context, req *AuthRequest) 
 func (ra *RAMAuthenticator) validateSignature(req *AuthRequest) bool {
 	// Build canonical string
 	canonicalString := ra.buildCanonicalString(req)
-	
+
 	// Calculate expected signature
 	expectedSignature := ra.calculateSignature(canonicalString)
-	
+
 	// Compare signatures
 	return hmac.Equal([]byte(req.Signature), []byte(expectedSignature))
 }
 
 func (ra *RAMAuthenticator) buildCanonicalString(req *AuthRequest) string {
 	var parts []string
-	
+
 	// HTTP method
 	parts = append(parts, strings.ToUpper(req.Method))
-	
+
 	// URI
 	parts = append(parts, req.URI)
-	
+
 	// Canonical query string
 	if len(req.QueryParameters) > 0 {
 		var queryParts []string
@@ -153,7 +153,7 @@ func (ra *RAMAuthenticator) buildCanonicalString(req *AuthRequest) string {
 	} else {
 		parts = append(parts, "")
 	}
-	
+
 	// Canonical headers
 	if len(req.Headers) > 0 {
 		var headerParts []string
@@ -165,11 +165,11 @@ func (ra *RAMAuthenticator) buildCanonicalString(req *AuthRequest) string {
 	} else {
 		parts = append(parts, "")
 	}
-	
+
 	// Timestamp and nonce
 	parts = append(parts, req.Timestamp)
 	parts = append(parts, req.Nonce)
-	
+
 	return strings.Join(parts, "\n")
 }
 
@@ -184,10 +184,10 @@ func (ra *RAMAuthenticator) validateTimestamp(timestamp string) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	requestTime := time.Unix(ts, 0)
 	now := time.Now()
-	
+
 	// Allow 5 minutes clock skew
 	return now.Sub(requestTime) <= 5*time.Minute && requestTime.Sub(now) <= 5*time.Minute
 }
@@ -195,9 +195,10 @@ func (ra *RAMAuthenticator) validateTimestamp(timestamp string) bool {
 func (ra *RAMAuthenticator) getUserInfo(ctx context.Context, accessKeyID string) (*UserInfo, error) {
 	// In a real implementation, this would make a call to Aliyun RAM API
 	// For now, we'll return mock data based on the access key
-	
+	_ = ctx // TODO: Use context for API calls when implementing real RAM integration
+
 	logrus.WithField("access_key_id", accessKeyID).Info("Fetching user info from RAM")
-	
+
 	// Mock user info based on access key pattern
 	userInfo := &UserInfo{
 		UserID:   fmt.Sprintf("user-%s", accessKeyID[len(accessKeyID)-8:]),
@@ -217,45 +218,45 @@ func (ra *RAMAuthenticator) getUserInfo(ctx context.Context, accessKeyID string)
 			"auth_method": "ram",
 		},
 	}
-	
+
 	// Add admin permissions for specific access keys
 	if strings.HasPrefix(accessKeyID, "LTAI") && strings.Contains(accessKeyID, "admin") {
 		userInfo.Roles = append(userInfo.Roles, "ai-gateway-admin")
 		userInfo.Permissions = append(userInfo.Permissions, "ai:admin", "ai:metrics")
 		userInfo.Policies = append(userInfo.Policies, "AIGatewayAdminPolicy")
 	}
-	
+
 	return userInfo, nil
 }
 
 func (ra *RAMAuthenticator) getFromCache(accessKeyID string) *CacheEntry {
 	ra.mutex.RLock()
 	defer ra.mutex.RUnlock()
-	
+
 	entry, exists := ra.cache[accessKeyID]
 	if !exists {
 		return nil
 	}
-	
+
 	if time.Now().After(entry.ExpiresAt) {
 		delete(ra.cache, accessKeyID)
 		return nil
 	}
-	
+
 	return entry
 }
 
 func (ra *RAMAuthenticator) setCache(accessKeyID string, entry *CacheEntry) {
 	ra.mutex.Lock()
 	defer ra.mutex.Unlock()
-	
+
 	ra.cache[accessKeyID] = entry
 }
 
 func (ra *RAMAuthenticator) ClearCache() {
 	ra.mutex.Lock()
 	defer ra.mutex.Unlock()
-	
+
 	ra.cache = make(map[string]*CacheEntry)
 }
 
@@ -263,14 +264,14 @@ func (ra *RAMAuthenticator) CheckPermission(userInfo *UserInfo, resource, action
 	if userInfo == nil {
 		return false
 	}
-	
+
 	// Check if user has admin role
 	for _, role := range userInfo.Roles {
 		if role == "ai-gateway-admin" {
 			return true
 		}
 	}
-	
+
 	// Check specific permissions
 	requiredPermission := fmt.Sprintf("%s:%s", resource, action)
 	for _, permission := range userInfo.Permissions {
@@ -278,7 +279,7 @@ func (ra *RAMAuthenticator) CheckPermission(userInfo *UserInfo, resource, action
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -290,7 +291,7 @@ func (ra *RAMAuthenticator) Middleware() func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Extract RAM authentication info from request
 			authReq := ra.extractAuthRequest(r)
 			if authReq == nil {
@@ -298,14 +299,14 @@ func (ra *RAMAuthenticator) Middleware() func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Perform authentication
 			authResp, err := ra.Authenticate(r.Context(), authReq)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Authentication error: %v", err), http.StatusInternalServerError)
 				return
 			}
-			
+
 			if !authResp.Authenticated {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
@@ -318,11 +319,11 @@ func (ra *RAMAuthenticator) Middleware() func(http.Handler) http.Handler {
 				})
 				return
 			}
-			
+
 			// Add user info to request context
 			ctx := context.WithValue(r.Context(), "ram_user_info", authResp.UserInfo)
 			r = r.WithContext(ctx)
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -334,11 +335,11 @@ func (ra *RAMAuthenticator) extractAuthRequest(r *http.Request) *AuthRequest {
 	signature := r.Header.Get("X-Ram-Signature")
 	timestamp := r.Header.Get("X-Ram-Timestamp")
 	nonce := r.Header.Get("X-Ram-Nonce")
-	
+
 	if accessKeyID == "" || signature == "" || timestamp == "" || nonce == "" {
 		return nil
 	}
-	
+
 	// Convert headers to map
 	headers := make(map[string]string)
 	for k, v := range r.Header {
@@ -346,7 +347,7 @@ func (ra *RAMAuthenticator) extractAuthRequest(r *http.Request) *AuthRequest {
 			headers[k] = v[0]
 		}
 	}
-	
+
 	// Convert query parameters to map
 	queryParams := make(map[string]string)
 	for k, v := range r.URL.Query() {
@@ -354,7 +355,7 @@ func (ra *RAMAuthenticator) extractAuthRequest(r *http.Request) *AuthRequest {
 			queryParams[k] = v[0]
 		}
 	}
-	
+
 	return &AuthRequest{
 		AccessKeyID:     accessKeyID,
 		Signature:       signature,
@@ -387,12 +388,12 @@ func (ra *RAMAuthenticator) ValidateRequest(r *http.Request, accessKeyID, signat
 
 	// Build auth request
 	authReq := &AuthRequest{
-		AccessKeyID: accessKeyID,
-		Signature:   signature,
-		Timestamp:   timestamp,
-		Method:      r.Method,
-		URI:         r.URL.Path,
-		Headers:     make(map[string]string),
+		AccessKeyID:     accessKeyID,
+		Signature:       signature,
+		Timestamp:       timestamp,
+		Method:          r.Method,
+		URI:             r.URL.Path,
+		Headers:         make(map[string]string),
 		QueryParameters: make(map[string]string),
 	}
 

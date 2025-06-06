@@ -93,7 +93,7 @@ func APIKeyAuth(cfg *config.Config) gin.HandlerFunc {
 }
 
 // RAM authentication middleware
-func RAMAuth(authenticator *ram.Authenticator) gin.HandlerFunc {
+func RAMAuth(authenticator *ram.RAMAuthenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip authentication for health check and metrics endpoints
 		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/metrics" {

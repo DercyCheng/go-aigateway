@@ -44,7 +44,7 @@ func NewManager(cfg *config.ServiceDiscoveryConfig) (*Manager, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	manager := &Manager{
 		config:   cfg,
 		services: make(map[string][]*ServiceInstance),
@@ -79,7 +79,7 @@ func NewManager(cfg *config.ServiceDiscoveryConfig) (*Manager, error) {
 func (m *Manager) GetServices(serviceName string) []*ServiceInstance {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	services := m.services[serviceName]
 	result := make([]*ServiceInstance, len(services))
 	copy(result, services)
@@ -90,7 +90,7 @@ func (m *Manager) RegisterService(instance *ServiceInstance) error {
 	if m.discovery == nil {
 		return fmt.Errorf("service discovery not enabled")
 	}
-	
+
 	return m.discovery.Register(instance)
 }
 
@@ -98,7 +98,7 @@ func (m *Manager) DeregisterService(instanceID string) error {
 	if m.discovery == nil {
 		return fmt.Errorf("service discovery not enabled")
 	}
-	
+
 	return m.discovery.Deregister(instanceID)
 }
 
@@ -126,11 +126,11 @@ func (m *Manager) Close() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	
+
 	if m.discovery != nil {
 		return m.discovery.Close()
 	}
-	
+
 	return nil
 }
 

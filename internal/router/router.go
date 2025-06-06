@@ -3,10 +3,10 @@ package router
 import (
 	"time"
 
+	"go-aigateway/internal/cloud"
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/handlers"
 	"go-aigateway/internal/middleware"
-	"go-aigateway/internal/cloud"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -74,7 +74,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 				c.JSON(400, gin.H{"error": err.Error()})
 				return
 			}
-			
+
 			if err := integrator.ScaleService(serviceName, req.Replicas); err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
 				return
@@ -85,7 +85,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 		cloudGroup.GET("/services/:name/metrics", func(c *gin.Context) {
 			serviceName := c.Param("name")
 			var timeRange cloud.TimeRange
-			
+
 			// Parse start time
 			if startStr := c.Query("start"); startStr != "" {
 				if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
@@ -96,7 +96,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 			} else {
 				timeRange.Start = time.Now().Add(-1 * time.Hour)
 			}
-			
+
 			// Parse end time
 			if endStr := c.Query("end"); endStr != "" {
 				if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
@@ -107,7 +107,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 			} else {
 				timeRange.End = time.Now()
 			}
-			
+
 			metrics, err := integrator.GetMetrics(serviceName, timeRange)
 			if err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -119,7 +119,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 		cloudGroup.GET("/services/:name/logs", func(c *gin.Context) {
 			serviceName := c.Param("name")
 			var timeRange cloud.TimeRange
-			
+
 			// Parse start time
 			if startStr := c.Query("start"); startStr != "" {
 				if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
@@ -130,7 +130,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 			} else {
 				timeRange.Start = time.Now().Add(-1 * time.Hour)
 			}
-			
+
 			// Parse end time
 			if endStr := c.Query("end"); endStr != "" {
 				if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
@@ -141,7 +141,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 			} else {
 				timeRange.End = time.Now()
 			}
-			
+
 			logs, err := integrator.GetLogs(serviceName, timeRange)
 			if err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -157,7 +157,7 @@ func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 				c.JSON(400, gin.H{"error": err.Error()})
 				return
 			}
-			
+
 			if err := integrator.UpdateConfiguration(serviceName, config); err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
 				return

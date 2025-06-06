@@ -1,8 +1,6 @@
 package cloud
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"go-aigateway/internal/config"
 	"net/http"
@@ -28,29 +26,29 @@ type CloudProvider interface {
 }
 
 type ServiceInfo struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Status      string            `json:"status"`
-	Instances   int               `json:"instances"`
-	Region      string            `json:"region"`
-	Endpoint    string            `json:"endpoint"`
-	Tags        map[string]string `json:"tags"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	Name      string            `json:"name"`
+	Type      string            `json:"type"`
+	Status    string            `json:"status"`
+	Instances int               `json:"instances"`
+	Region    string            `json:"region"`
+	Endpoint  string            `json:"endpoint"`
+	Tags      map[string]string `json:"tags"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 type HealthStatus struct {
-	Service     string            `json:"service"`
-	Status      string            `json:"status"` // healthy, unhealthy, unknown
-	Instances   []InstanceHealth  `json:"instances"`
+	Service     string             `json:"service"`
+	Status      string             `json:"status"` // healthy, unhealthy, unknown
+	Instances   []InstanceHealth   `json:"instances"`
 	Metrics     map[string]float64 `json:"metrics"`
-	LastChecked time.Time         `json:"last_checked"`
+	LastChecked time.Time          `json:"last_checked"`
 }
 
 type InstanceHealth struct {
-	ID       string            `json:"id"`
-	Status   string            `json:"status"`
-	Endpoint string            `json:"endpoint"`
+	ID       string             `json:"id"`
+	Status   string             `json:"status"`
+	Endpoint string             `json:"endpoint"`
 	Metrics  map[string]float64 `json:"metrics"`
 }
 
@@ -71,10 +69,10 @@ type DataPoint struct {
 }
 
 type LogEntry struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Level     string            `json:"level"`
-	Message   string            `json:"message"`
-	Source    string            `json:"source"`
+	Timestamp time.Time              `json:"timestamp"`
+	Level     string                 `json:"level"`
+	Message   string                 `json:"message"`
+	Source    string                 `json:"source"`
 	Fields    map[string]interface{} `json:"fields"`
 }
 
@@ -184,7 +182,7 @@ func (ap *AliyunProvider) Initialize(config *config.CloudIntegrationConfig) erro
 
 func (ap *AliyunProvider) GetServices() ([]ServiceInfo, error) {
 	logrus.Info("Fetching services from Aliyun")
-	
+
 	// Mock implementation - in reality, this would call Aliyun APIs
 	services := []ServiceInfo{
 		{
@@ -216,13 +214,13 @@ func (ap *AliyunProvider) GetServices() ([]ServiceInfo, error) {
 			UpdatedAt: time.Now().Add(-30 * time.Minute),
 		},
 	}
-	
+
 	return services, nil
 }
 
 func (ap *AliyunProvider) GetServiceHealth(serviceName string) (*HealthStatus, error) {
 	logrus.WithField("service", serviceName).Info("Checking service health on Aliyun")
-	
+
 	// Mock implementation
 	health := &HealthStatus{
 		Service: serviceName,
@@ -258,7 +256,7 @@ func (ap *AliyunProvider) GetServiceHealth(serviceName string) (*HealthStatus, e
 		},
 		LastChecked: time.Now(),
 	}
-	
+
 	return health, nil
 }
 
@@ -267,7 +265,7 @@ func (ap *AliyunProvider) ScaleService(serviceName string, replicas int) error {
 		"service":  serviceName,
 		"replicas": replicas,
 	}).Info("Scaling service on Aliyun")
-	
+
 	// Mock implementation - would call Aliyun ECS or Container Service APIs
 	return nil
 }
@@ -278,7 +276,7 @@ func (ap *AliyunProvider) GetMetrics(serviceName string, timeRange TimeRange) (*
 		"start":   timeRange.Start,
 		"end":     timeRange.End,
 	}).Info("Fetching metrics from Aliyun CloudMonitor")
-	
+
 	// Mock implementation
 	metrics := &MetricsData{
 		Service:   serviceName,
@@ -301,7 +299,7 @@ func (ap *AliyunProvider) GetMetrics(serviceName string, timeRange TimeRange) (*
 			},
 		},
 	}
-	
+
 	return metrics, nil
 }
 
@@ -311,7 +309,7 @@ func (ap *AliyunProvider) GetLogs(serviceName string, timeRange TimeRange) ([]Lo
 		"start":   timeRange.Start,
 		"end":     timeRange.End,
 	}).Info("Fetching logs from Aliyun SLS")
-	
+
 	// Mock implementation
 	logs := []LogEntry{
 		{
@@ -335,7 +333,7 @@ func (ap *AliyunProvider) GetLogs(serviceName string, timeRange TimeRange) ([]Lo
 			},
 		},
 	}
-	
+
 	return logs, nil
 }
 
@@ -344,7 +342,7 @@ func (ap *AliyunProvider) UpdateConfiguration(serviceName string, config map[str
 		"service": serviceName,
 		"config":  config,
 	}).Info("Updating service configuration on Aliyun")
-	
+
 	// Mock implementation - would call appropriate Aliyun APIs
 	return nil
 }
