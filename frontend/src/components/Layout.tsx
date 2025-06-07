@@ -8,7 +8,8 @@ import {
     Globe,
     Shield,
     Menu,
-    X
+    X,
+    Cpu
 } from 'lucide-react'
 
 interface LayoutProps {
@@ -26,6 +27,7 @@ const Layout = ({ children }: LayoutProps) => {
         { name: '路由配置', href: '/route-config', icon: Route, current: location.pathname === '/route-config' },
         { name: '域名管理', href: '/domain-management', icon: Globe, current: location.pathname === '/domain-management' },
         { name: '证书管理', href: '/certificate-management', icon: Shield, current: location.pathname === '/certificate-management' },
+        { name: '本地模型', href: '/local-models', icon: Cpu, current: location.pathname === '/local-models' },
     ]
 
     return (
@@ -53,8 +55,8 @@ const Layout = ({ children }: LayoutProps) => {
                                     key={item.name}
                                     to={item.href}
                                     className={`group flex items-center px-2 py-2 text-base font-medium rounded-md ${item.current
-                                            ? 'bg-blue-100 text-blue-900'
-                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                        ? 'bg-blue-100 text-blue-900'
+                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                                         }`}
                                 >
                                     <item.icon className="mr-4 h-6 w-6" />
@@ -79,8 +81,8 @@ const Layout = ({ children }: LayoutProps) => {
                                     key={item.name}
                                     to={item.href}
                                     className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md ${item.current
-                                            ? 'bg-blue-100 text-blue-900'
-                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                        ? 'bg-blue-100 text-blue-900'
+                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                                         }`}
                                 >
                                     <item.icon className="mr-3 h-5 w-5" />

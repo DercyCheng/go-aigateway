@@ -73,6 +73,34 @@ const ServiceList = () => {
             endpoint: '/v1/chat/completions',
             rateLimit: 15000,
             description: 'Fast and efficient model for most tasks'
+        },
+        {
+            id: '5',
+            name: 'TinyLlama Chat',
+            model: 'TinyLlama-1.1B-Chat-v1.0',
+            provider: 'Local',
+            status: 'healthy',
+            requests: 73,
+            avgResponseTime: 350,
+            successRate: 99.9,
+            lastCheck: '2024-01-20 14:32:00',
+            endpoint: '/local/chat/completions',
+            rateLimit: 9999,
+            description: '本地轻量对话模型，仅1.1B参数，速度快'
+        },
+        {
+            id: '6',
+            name: 'Phi-2 Completion',
+            model: 'microsoft/phi-2',
+            provider: 'Local',
+            status: 'healthy',
+            requests: 42,
+            avgResponseTime: 300,
+            successRate: 99.8,
+            lastCheck: '2024-01-20 14:32:15',
+            endpoint: '/local/completions',
+            rateLimit: 9999,
+            description: '本地补全模型，适合文本生成任务'
         }
     ])
 

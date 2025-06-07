@@ -131,7 +131,5 @@ INSERT INTO configurations (key, value, description) VALUES
 ('log_level', '"info"', 'Default log level')
 ON CONFLICT (key) DO NOTHING;
 
--- 插入默认 API 密钥 (用于开发，生产环境应该删除)
-INSERT INTO api_keys (key_id, key_hash, name, description, permissions) VALUES
-('dev-key-001', 'sha256-hash-placeholder', 'Development Key', 'Default development API key', '{"admin": true, "read": true, "write": true}')
-ON CONFLICT (key_id) DO NOTHING;
+-- API keys will be managed through the application's local authentication system
+-- No default keys are inserted for security reasons

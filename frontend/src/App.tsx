@@ -6,6 +6,7 @@ import ServiceList from './pages/ServiceList'
 import RouteConfig from './pages/RouteConfig'
 import DomainManagement from './pages/DomainManagement'
 import CertificateManagement from './pages/CertificateManagement'
+import LocalModelManagement from './pages/LocalModelManagement'
 import './App.css'
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <Route path="/route-config" element={<RouteConfig />} />
           <Route path="/domain-management" element={<DomainManagement />} />
           <Route path="/certificate-management" element={<CertificateManagement />} />
+          <Route path="/local-models" element={<LocalModelManagement />} />
         </Routes>
       </Layout>
     </Router>

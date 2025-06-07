@@ -8,15 +8,19 @@ import (
 )
 
 type Config struct {
-	Port        string
-	GinMode     string
-	TargetURL   string
-	TargetKey   string
-	GatewayKeys []string
-	LogLevel    string
-	LogFormat   string
-	RateLimit   int
-	HealthCheck bool
+	Port           string
+	GinMode        string
+	TargetURL      string
+	TargetKey      string
+	GatewayKeys    []string
+	LogLevel       string
+	LogFormat      string
+	RateLimit      int
+	HealthCheck    bool
+	AllowedOrigins []string // CORS allowed origins
+
+	// Security Configuration
+	Security SecurityConfig
 
 	// Redis Configuration
 	Redis RedisConfig
@@ -38,6 +42,19 @@ type Config struct {
 
 	// Monitoring
 	Monitoring MonitoringConfig
+
+	// Local Model with Python
+	LocalModel LocalModelConfig
+}
+
+// SecurityConfig represents security-related configuration
+type SecurityConfig struct {
+	EnableLocalAuth bool          // Use local authentication instead of RAM
+	JWTSecret       string        // JWT secret for token generation
+	TokenExpiration time.Duration // JWT token expiration
+	RequireHTTPS    bool          // Force HTTPS in production
+	APIKeyPrefix    string        // Prefix for API keys
+	MaxAPIKeys      int           // Maximum number of API keys per user
 }
 
 type ServiceDiscoveryConfig struct {
@@ -91,6 +108,7 @@ type RAMAuthConfig struct {
 
 type CloudIntegrationConfig struct {
 	Enabled       bool
+	Provider      string // aliyun, aws, azure, gcp (alias for CloudProvider)
 	CloudProvider string // aliyun, aws, azure, gcp
 	Region        string
 	Credentials   CloudCredentials
@@ -103,17 +121,48 @@ type CloudCredentials struct {
 	SessionToken    string
 }
 
+// LocalModelConfig represents the configuration for local models using Python
+type LocalModelConfig struct {
+	Enabled       bool
+	PythonPath    string
+	ModelPath     string
+	ServerHost    string
+	ServerPort    int
+	Port          string // String version of ServerPort for compatibility
+	Timeout       time.Duration
+	MaxTokens     int
+	Temperature   float64
+	Type          string // "chat", "completion", "embedding" (alias for ModelType)
+	ModelType     string // "chat", "completion", "embedding"
+	Size          string // "small", "medium", "large" (alias for ModelSize)
+	ModelSize     string // "small", "medium", "large"
+	RetryAttempts int
+	RetryDelay    time.Duration
+	LogRequests   bool
+	LogResponses  bool
+}
+
 func New() *Config {
 	return &Config{
-		Port:        getEnv("PORT", "8080"),
-		GinMode:     getEnv("GIN_MODE", "release"),
-		TargetURL:   getEnv("TARGET_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-		TargetKey:   getEnv("TARGET_API_KEY", ""),
-		GatewayKeys: strings.Split(getEnv("GATEWAY_API_KEYS", ""), ","),
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		LogFormat:   getEnv("LOG_FORMAT", "json"),
-		RateLimit:   getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
-		HealthCheck: getEnvBool("HEALTH_CHECK_ENABLED", true),
+		Port:      getEnv("PORT", "8080"),
+		GinMode:   getEnv("GIN_MODE", "release"),
+		TargetURL: getEnv("TARGET_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+		TargetKey: getEnv("TARGET_API_KEY", ""), GatewayKeys: strings.Split(getEnv("GATEWAY_API_KEYS", ""), ","),
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		LogFormat:      getEnv("LOG_FORMAT", "json"),
+		RateLimit:      getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
+		HealthCheck:    getEnvBool("HEALTH_CHECK_ENABLED", true),
+		AllowedOrigins: strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"), ","),
+
+		// Security Configuration
+		Security: SecurityConfig{
+			EnableLocalAuth: getEnvBool("ENABLE_LOCAL_AUTH", true),
+			JWTSecret:       getEnv("JWT_SECRET", ""),
+			TokenExpiration: getEnvDuration("TOKEN_EXPIRATION", 24*time.Hour),
+			RequireHTTPS:    getEnvBool("REQUIRE_HTTPS", false),
+			APIKeyPrefix:    getEnv("API_KEY_PREFIX", "gw-"),
+			MaxAPIKeys:      getEnvInt("MAX_API_KEYS_PER_USER", 10),
+		},
 
 		Redis: RedisConfig{
 			Enabled:  getEnvBool("REDIS_ENABLED", true),
@@ -147,11 +196,11 @@ func New() *Config {
 			PolicyDocument:  getEnv("RAM_POLICY_DOCUMENT", ""),
 			CacheExpiration: getEnvDuration("RAM_CACHE_EXPIRATION", 15*time.Minute),
 		},
-
 		CloudIntegration: CloudIntegrationConfig{
 			Enabled:       getEnvBool("CLOUD_INTEGRATION_ENABLED", false),
+			Provider:      getEnv("CLOUD_INTEGRATION_PROVIDER", getEnv("CLOUD_PROVIDER", "aliyun")),
 			CloudProvider: getEnv("CLOUD_PROVIDER", "aliyun"),
-			Region:        getEnv("CLOUD_REGION", "cn-hangzhou"),
+			Region:        getEnv("CLOUD_INTEGRATION_REGION", getEnv("CLOUD_REGION", "cn-hangzhou")),
 			Credentials: CloudCredentials{
 				AccessKeyID:     getEnv("CLOUD_ACCESS_KEY_ID", ""),
 				AccessKeySecret: getEnv("CLOUD_ACCESS_KEY_SECRET", ""),
@@ -169,11 +218,29 @@ func New() *Config {
 			ScaleUpCooldown:   getEnvDuration("AUTO_SCALING_UP_COOLDOWN", 3*time.Minute),
 			ScaleDownCooldown: getEnvDuration("AUTO_SCALING_DOWN_COOLDOWN", 5*time.Minute),
 		},
-
 		Monitoring: MonitoringConfig{
 			Enabled:          getEnvBool("MONITORING_ENABLED", true),
 			AlertsEnabled:    getEnvBool("MONITORING_ALERTS_ENABLED", true),
 			MetricsRetention: getEnvDuration("MONITORING_METRICS_RETENTION", 24*time.Hour),
+		},
+		LocalModel: LocalModelConfig{
+			Enabled:       getEnvBool("LOCAL_MODEL_ENABLED", false),
+			PythonPath:    getEnv("PYTHON_PATH", "python"),
+			ModelPath:     getEnv("MODEL_PATH", "./python/model"),
+			ServerHost:    getEnv("LOCAL_MODEL_HOST", "localhost"),
+			ServerPort:    getEnvInt("LOCAL_MODEL_PORT", 5000),
+			Port:          getEnv("LOCAL_MODEL_PORT", "5000"),
+			Timeout:       getEnvDuration("LOCAL_MODEL_TIMEOUT", 30*time.Second),
+			MaxTokens:     getEnvInt("LOCAL_MODEL_MAX_TOKENS", 1024),
+			Temperature:   getEnvFloat("LOCAL_MODEL_TEMPERATURE", 0.7),
+			Type:          getEnv("LOCAL_MODEL_TYPE", "chat"),
+			ModelType:     getEnv("LOCAL_MODEL_TYPE", "chat"),
+			Size:          getEnv("LOCAL_MODEL_SIZE", "small"),
+			ModelSize:     getEnv("LOCAL_MODEL_SIZE", "small"),
+			RetryAttempts: getEnvInt("LOCAL_MODEL_RETRY_ATTEMPTS", 3),
+			RetryDelay:    getEnvDuration("LOCAL_MODEL_RETRY_DELAY", 1*time.Second),
+			LogRequests:   getEnvBool("LOCAL_MODEL_LOG_REQUESTS", true),
+			LogResponses:  getEnvBool("LOCAL_MODEL_LOG_RESPONSES", true),
 		},
 	}
 }

@@ -192,3 +192,21 @@ func proxyRequest(c *gin.Context, cfg *config.Config, endpoint string) {
 	// Return raw response
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
+
+// HealthHandler is an alias for HealthCheck for backward compatibility
+var HealthHandler = HealthCheck
+
+// ChatHandler returns the ChatCompletions handler
+func ChatHandler(cfg *config.Config) gin.HandlerFunc {
+	return ChatCompletions(cfg)
+}
+
+// CompletionHandler returns the Completions handler
+func CompletionHandler(cfg *config.Config) gin.HandlerFunc {
+	return Completions(cfg)
+}
+
+// ModelsHandler returns the Models handler
+func ModelsHandler(cfg *config.Config) gin.HandlerFunc {
+	return Models(cfg)
+}

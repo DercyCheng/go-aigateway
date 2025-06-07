@@ -7,12 +7,13 @@ import (
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/handlers"
 	"go-aigateway/internal/middleware"
+	"go-aigateway/internal/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func SetupRoutes(r *gin.Engine, cfg *config.Config) {
+func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAuthenticator) {
 	// Health check endpoint (no auth required)
 	if cfg.HealthCheck {
 		r.GET("/health", handlers.HealthCheck)
@@ -22,9 +23,26 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config) {
 	// Metrics endpoint (no auth required)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	// API routes with authentication
+	// Authentication endpoints (no auth required for login)
+	auth := r.Group("/auth")
+	{
+		auth.POST("/login", handlers.Login(localAuth))
+		auth.POST("/refresh", handlers.RefreshToken(localAuth))
+	}
+
+	// API management endpoints (admin auth required)
+	admin := r.Group("/admin")
+	admin.Use(middleware.LocalAuth(localAuth, "admin"))
+	{
+		admin.POST("/api-keys", handlers.CreateAPIKey(localAuth))
+		admin.GET("/api-keys", handlers.ListAPIKeys(localAuth))
+		admin.DELETE("/api-keys/:id", handlers.DeleteAPIKey(localAuth))
+		admin.PUT("/api-keys/:id", handlers.UpdateAPIKey(localAuth))
+	}
+
+	// API routes with local authentication
 	api := r.Group("/v1")
-	api.Use(middleware.APIKeyAuth(cfg))
+	api.Use(middleware.LocalAuth(localAuth, "api"))
 
 	// Chat completions endpoint
 	api.POST("/chat/completions", handlers.ChatCompletions(cfg))

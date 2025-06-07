@@ -8,21 +8,63 @@ import (
 
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/ram"
+	"go-aigateway/internal/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
-// CORS middleware
-func CORS() gin.HandlerFunc {
+// CORS middleware with configurable origins
+func CORS(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		origin := c.Request.Header.Get("Origin")
+
+		// Default allowed origins for development
+		allowedOrigins := []string{
+			"http://localhost:3000",
+			"http://localhost:5173", // Vite dev server
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:5173",
+		}
+
+		// Add configured origins if available
+		if len(cfg.AllowedOrigins) > 0 {
+			allowedOrigins = cfg.AllowedOrigins
+		}
+
+		// Check if origin is allowed
+		allowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				allowed = true
+				break
+			}
+		}
+
+		// If no specific origin matches and we're in development mode, allow localhost
+		if !allowed && (cfg.GinMode == "debug" || cfg.GinMode == "development") {
+			if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				allowed = true
+			}
+		}
+
+		// Set other CORS headers only if origin is allowed
+		if allowed {
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-API-Key")
+			c.Header("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
+		}
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
+			if allowed {
+				c.AbortWithStatus(http.StatusNoContent)
+			} else {
+				c.AbortWithStatus(http.StatusForbidden)
+			}
 			return
 		}
 
@@ -147,6 +189,124 @@ func RAMAuth(authenticator *ram.RAMAuthenticator) gin.HandlerFunc {
 
 		// Store access key ID in context for later use
 		c.Set("ram_access_key_id", accessKeyID)
+		c.Next()
+	}
+}
+
+// Local JWT authentication middleware
+// LocalAuth middleware for JWT-based authentication
+func LocalAuth(localAuth *security.LocalAuthenticator, requiredPermission string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get token from Authorization header or API key header
+		authHeader := c.GetHeader("Authorization")
+		apiKeyHeader := c.GetHeader("X-API-Key")
+
+		var token string
+		var isAPIKey bool
+
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+			isAPIKey = false
+		} else if apiKeyHeader != "" {
+			token = apiKeyHeader
+			isAPIKey = true
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{
+					"message": "Missing authentication token",
+					"type":    "authentication_error",
+					"code":    "missing_token",
+				},
+			})
+			c.Abort()
+			return
+		}
+		if isAPIKey {
+			// Validate API key
+			userInfo, keyInfo, err := localAuth.ValidateAPIKey(token)
+			if err != nil || userInfo == nil || keyInfo == nil {
+				logrus.WithError(err).Error("API key validation failed")
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": gin.H{
+						"message": "Invalid API key",
+						"type":    "authentication_error",
+						"code":    "invalid_api_key",
+					},
+				})
+				c.Abort()
+				return
+			}
+
+			// Check permission - look for permission in user's permissions slice
+			if requiredPermission != "" {
+				hasPermission := false
+				for _, perm := range userInfo.Permissions {
+					if perm == requiredPermission {
+						hasPermission = true
+						break
+					}
+				}
+				if !hasPermission {
+					c.JSON(http.StatusForbidden, gin.H{
+						"error": gin.H{
+							"message": "Insufficient permissions",
+							"type":    "authorization_error",
+							"code":    "insufficient_permissions",
+						},
+					})
+					c.Abort()
+					return
+				}
+			}
+
+			// Set user context
+			c.Set("user_id", userInfo.ID)
+			c.Set("permissions", userInfo.Permissions)
+			c.Set("auth_type", "api_key")
+		} else {
+			// Validate JWT token
+			claims, err := localAuth.ValidateJWT(token)
+			if err != nil {
+				logrus.WithError(err).Error("JWT validation failed")
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": gin.H{
+						"message": "Invalid or expired token",
+						"type":    "authentication_error",
+						"code":    "invalid_token",
+					},
+				})
+				c.Abort()
+				return
+			}
+
+			// Check permission - look for permission in claims permissions slice
+			if requiredPermission != "" {
+				hasPermission := false
+				for _, perm := range claims.Permissions {
+					if perm == requiredPermission {
+						hasPermission = true
+						break
+					}
+				}
+				if !hasPermission {
+					c.JSON(http.StatusForbidden, gin.H{
+						"error": gin.H{
+							"message": "Insufficient permissions",
+							"type":    "authorization_error",
+							"code":    "insufficient_permissions",
+						},
+					})
+					c.Abort()
+					return
+				}
+			}
+
+			// Set user context
+			c.Set("user_id", claims.UserID)
+			c.Set("permissions", claims.Permissions)
+			c.Set("auth_type", "jwt")
+		}
+
 		c.Next()
 	}
 }

@@ -85,5 +85,5 @@ metadata:
   name: ai-gateway-secret
 type: Opaque
 data:
-  target-api-key: eW91ci1kYXNoc2NvcGUtYXBpLWtleS1oZXJl # base64 encoded
-  gateway-api-keys: c2stZ2F0ZXdheS1rZXkx # base64 encoded
+  target-api-key: <base64-encoded-target-api-key> # Replace with actual base64 encoded key
+  jwt-secret: <base64-encoded-jwt-secret> # Replace with actual base64 encoded JWT secret

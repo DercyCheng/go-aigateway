@@ -2,23 +2,23 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
 	"go-aigateway/internal/autoscaler"
 	"go-aigateway/internal/cloud"
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/discovery"
 	"go-aigateway/internal/handlers"
+	"go-aigateway/internal/localmodel"
 	"go-aigateway/internal/middleware"
 	"go-aigateway/internal/monitoring"
 	"go-aigateway/internal/protocol"
-	"go-aigateway/internal/ram"
 	redisClient "go-aigateway/internal/redis"
 	"go-aigateway/internal/router"
+	"go-aigateway/internal/security"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -64,17 +64,34 @@ func main() {
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to initialize service discovery")
 	}
-	defer serviceDiscovery.Close()
-
-	// Initialize protocol converter
+	defer serviceDiscovery.Close() // Initialize protocol converter
 	protocolConverter := protocol.NewProtocolConverter(&cfg.ProtocolConversion)
 
-	// Initialize RAM authenticator
-	ramAuth := ram.NewRAMAuthenticator(&cfg.RAMAuth)
-	// Initialize cloud integrator
+	// Initialize local authentication system
+	localAuth := security.NewLocalAuthenticator(&cfg.Security) // Initialize cloud integrator
 	cloudIntegrator, err := cloud.NewCloudIntegrator(&cfg.CloudIntegration)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to initialize cloud integrator")
+	}
+
+	// Initialize local model server and manager if enabled
+	var localModelManager *localmodel.Manager
+	if cfg.LocalModel.Enabled {
+		// Create Python model server
+		server := localmodel.NewPythonModelServer(&cfg.LocalModel)
+		// Create manager
+		localModelManager = localmodel.NewManager(server)
+
+		// Start local model server if configured to auto-start
+		if cfg.LocalModel.Enabled {
+			go func() {
+				if err := localModelManager.Start(context.Background()); err != nil {
+					logrus.WithError(err).Error("Failed to start local model server")
+				} else {
+					logrus.Info("Local model server started successfully")
+				}
+			}()
+		}
 	}
 
 	// Initialize advanced monitoring components (only if Redis is enabled)
@@ -127,13 +144,12 @@ func main() {
 
 	// Setup Gin mode
 	gin.SetMode(cfg.GinMode)
-
 	// Initialize router
 	r := gin.New()
 	// Add middleware
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(cfg)) // Pass config to CORS middleware
 	r.Use(middleware.PrometheusMetrics())
 
 	// Use Redis rate limiter if available, otherwise use memory-based limiter
@@ -157,15 +173,16 @@ func main() {
 		})
 	}
 
-	// Add RAM authentication middleware if enabled
-	if cfg.RAMAuth.Enabled {
-		r.Use(middleware.RAMAuth(ramAuth))
-	}
 	// Setup routes
-	router.SetupRoutes(r, cfg)
-
+	router.SetupRoutes(r, cfg, localAuth)
 	// Setup cloud management routes
 	router.SetupCloudRoutes(r, cloudIntegrator)
+
+	// Setup local model routes if enabled
+	if cfg.LocalModel.Enabled && localModelManager != nil {
+		router.SetupLocalModelRoutes(r, localModelManager, cfg)
+		logrus.Info("Local model API routes registered")
+	}
 
 	// Setup monitoring routes if available
 	if monitoringHandler != nil {
