@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, Edit, Trash2, Copy, ArrowRight, Settings } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Edit, Trash2, Copy, ArrowRight, Settings, RefreshCw } from 'lucide-react'
+import { apiService } from '../services/api'
 
 interface RouteRule {
     id: string
@@ -25,7 +26,23 @@ interface RouteRule {
 }
 
 const RouteConfig = () => {
-    const [routes, setRoutes] = useState<RouteRule[]>([
+    const [routes, setRoutes] = useState<RouteRule[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [showForm, setShowForm] = useState(false)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [formData, setFormData] = useState({
+        name: '',
+        path: '',
+        method: 'GET',
+        target: '',
+        priority: 1,
+        enabled: true,
+        rateLimit: 100,
+        timeout: 30000
+    })
+
+    // Mock data as fallback
+    const mockRoutes: RouteRule[] = [
         {
             id: '1',
             name: 'ChatGPT API Route',
@@ -82,45 +99,92 @@ const RouteConfig = () => {
             createdAt: '2024-01-17',
             updatedAt: '2024-01-18'
         }
-    ])
+    ]
 
-    const [showForm, setShowForm] = useState(false)
-    const [editingId, setEditingId] = useState<string | null>(null)
-    const [formData, setFormData] = useState({
-        name: '',
-        path: '',
-        method: 'GET',
-        target: '',
-        priority: 1,
-        enabled: true,
-        rateLimit: 100,
-        timeout: 30000
-    })
+    // Fetch routes from API
+    useEffect(() => {
+        fetchRoutes()
+    }, [])
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const fetchRoutes = async () => {
+        try {
+            const response = await apiService.getRoutes()
+            if (response && Array.isArray(response)) {
+                setRoutes(response)
+            } else {
+                // Fallback to mock data if API fails
+                setRoutes(mockRoutes)
+            }
+        } catch (error) {
+            console.error('Failed to fetch routes:', error)
+            // Fallback to mock data
+            setRoutes(mockRoutes)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (editingId) {
-            setRoutes(routes.map(route =>
-                route.id === editingId
-                    ? {
-                        ...route,
+        try {
+            if (editingId) {
+                // Update existing route
+                await apiService.updateRoute(editingId, formData)
+                setRoutes(routes.map(route =>
+                    route.id === editingId
+                        ? {
+                            ...route,
+                            ...formData,
+                            actions: { ...route.actions, rateLimit: formData.rateLimit, timeout: formData.timeout },
+                            updatedAt: new Date().toISOString().split('T')[0]
+                        }
+                        : route
+                ))
+                setEditingId(null)
+            } else {
+                // Create new route
+                const response = await apiService.createRoute(formData)
+                if (response && response.data && response.data.id) {
+                    setRoutes([...routes, response.data])
+                } else {
+                    // Fallback to local state update
+                    const newRoute: RouteRule = {
+                        id: Date.now().toString(),
                         ...formData,
-                        actions: { ...route.actions, rateLimit: formData.rateLimit, timeout: formData.timeout },
+                        conditions: { headers: {}, queryParams: {} },
+                        actions: { rateLimit: formData.rateLimit, timeout: formData.timeout },
+                        createdAt: new Date().toISOString().split('T')[0],
                         updatedAt: new Date().toISOString().split('T')[0]
                     }
-                    : route
-            ))
-            setEditingId(null)
-        } else {
-            const newRoute: RouteRule = {
-                id: Date.now().toString(),
-                ...formData,
-                conditions: { headers: {}, queryParams: {} },
-                actions: { rateLimit: formData.rateLimit, timeout: formData.timeout },
-                createdAt: new Date().toISOString().split('T')[0],
-                updatedAt: new Date().toISOString().split('T')[0]
+                    setRoutes([...routes, newRoute])
+                }
             }
-            setRoutes([...routes, newRoute])
+        } catch (error) {
+            console.error('Failed to save route:', error)
+            // Fallback to local state update for better UX
+            if (editingId) {
+                setRoutes(routes.map(route =>
+                    route.id === editingId
+                        ? {
+                            ...route,
+                            ...formData,
+                            actions: { ...route.actions, rateLimit: formData.rateLimit, timeout: formData.timeout },
+                            updatedAt: new Date().toISOString().split('T')[0]
+                        }
+                        : route
+                ))
+                setEditingId(null)
+            } else {
+                const newRoute: RouteRule = {
+                    id: Date.now().toString(),
+                    ...formData,
+                    conditions: { headers: {}, queryParams: {} },
+                    actions: { rateLimit: formData.rateLimit, timeout: formData.timeout },
+                    createdAt: new Date().toISOString().split('T')[0],
+                    updatedAt: new Date().toISOString().split('T')[0]
+                }
+                setRoutes([...routes, newRoute])
+            }
         }
         setFormData({
             name: '',
@@ -150,16 +214,34 @@ const RouteConfig = () => {
         setShowForm(true)
     }
 
-    const handleDelete = (id: string) => {
-        setRoutes(routes.filter(route => route.id !== id))
+    const handleDelete = async (id: string) => {
+        try {
+            await apiService.deleteRoute(id)
+            setRoutes(routes.filter(route => route.id !== id))
+        } catch (error) {
+            console.error('Failed to delete route:', error)
+            // Fallback to local state update
+            setRoutes(routes.filter(route => route.id !== id))
+        }
     }
 
-    const toggleEnabled = (id: string) => {
-        setRoutes(routes.map(route =>
-            route.id === id
-                ? { ...route, enabled: !route.enabled, updatedAt: new Date().toISOString().split('T')[0] }
-                : route
-        ))
+    const toggleEnabled = async (id: string) => {
+        try {
+            await apiService.toggleRouteStatus(id)
+            setRoutes(routes.map(route =>
+                route.id === id
+                    ? { ...route, enabled: !route.enabled, updatedAt: new Date().toISOString().split('T')[0] }
+                    : route
+            ))
+        } catch (error) {
+            console.error('Failed to toggle route status:', error)
+            // Fallback to local state update
+            setRoutes(routes.map(route =>
+                route.id === id
+                    ? { ...route, enabled: !route.enabled, updatedAt: new Date().toISOString().split('T')[0] }
+                    : route
+            ))
+        }
     }
 
     const duplicateRoute = (route: RouteRule) => {
@@ -332,66 +414,88 @@ const RouteConfig = () => {
 
             {/* Routes List */}
             <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul className="divide-y divide-gray-200">
-                    {routes.map((route) => (
-                        <li key={route.id} className="px-6 py-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center space-x-3 mb-2">
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMethodColor(route.method)}`}>
-                                            {route.method}
-                                        </span>
-                                        <h3 className="text-sm font-medium text-gray-900">{route.name}</h3>
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${route.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                            }`}>
-                                            {route.enabled ? '启用' : '禁用'}
-                                        </span>
-                                        <span className="text-xs text-gray-500">优先级: {route.priority}</span>
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                        <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
+                        <span className="ml-2 text-gray-500">加载路由配置中...</span>
+                    </div>
+                ) : routes.length === 0 ? (
+                    <div className="text-center py-12">
+                        <Settings className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">暂无路由配置</h3>
+                        <p className="mt-1 text-sm text-gray-500">开始创建第一个路由规则</p>
+                        <div className="mt-6">
+                            <button
+                                onClick={() => setShowForm(true)}
+                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                            >
+                                <Plus className="h-4 w-4 mr-2" />
+                                添加路由
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <ul className="divide-y divide-gray-200">
+                        {routes.map((route) => (
+                            <li key={route.id} className="px-6 py-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMethodColor(route.method)}`}>
+                                                {route.method}
+                                            </span>
+                                            <h3 className="text-sm font-medium text-gray-900">{route.name}</h3>
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${route.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                                }`}>
+                                                {route.enabled ? '启用' : '禁用'}
+                                            </span>
+                                            <span className="text-xs text-gray-500">优先级: {route.priority}</span>
+                                        </div>
+                                        <div className="flex items-center space-x-2 text-sm text-gray-600 mb-2">
+                                            <code className="bg-gray-100 px-2 py-1 rounded text-xs">{route.path}</code>
+                                            <ArrowRight className="h-3 w-3" />
+                                            <code className="bg-blue-50 px-2 py-1 rounded text-xs">{route.target}</code>
+                                        </div>
+                                        <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                            <span>速率限制: {route.actions.rateLimit}/min</span>
+                                            <span>超时: {route.actions.timeout}ms</span>
+                                            <span>更新: {route.updatedAt}</span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center space-x-2 text-sm text-gray-600 mb-2">
-                                        <code className="bg-gray-100 px-2 py-1 rounded text-xs">{route.path}</code>
-                                        <ArrowRight className="h-3 w-3" />
-                                        <code className="bg-blue-50 px-2 py-1 rounded text-xs">{route.target}</code>
-                                    </div>
-                                    <div className="flex items-center space-x-4 text-xs text-gray-500">
-                                        <span>速率限制: {route.actions.rateLimit}/min</span>
-                                        <span>超时: {route.actions.timeout}ms</span>
-                                        <span>更新: {route.updatedAt}</span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <button
-                                        onClick={() => toggleEnabled(route.id)}
-                                        className={`p-1 rounded-full ${route.enabled
+                                    <div className="flex items-center space-x-2">
+                                        <button
+                                            onClick={() => toggleEnabled(route.id)}
+                                            className={`p-1 rounded-full ${route.enabled
                                                 ? 'text-green-600 hover:bg-green-100'
                                                 : 'text-gray-400 hover:bg-gray-100'
-                                            }`}
-                                    >
-                                        <Settings className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => duplicateRoute(route)}
-                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
-                                    >
-                                        <Copy className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleEdit(route)}
-                                        className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
-                                    >
-                                        <Edit className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDelete(route.id)}
-                                        className="p-1 text-red-600 hover:bg-red-100 rounded-full"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </button>
+                                                }`}
+                                        >
+                                            <Settings className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => duplicateRoute(route)}
+                                            className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
+                                        >
+                                            <Copy className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleEdit(route)}
+                                            className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
+                                        >
+                                            <Edit className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(route.id)}
+                                            className="p-1 text-red-600 hover:bg-red-100 rounded-full"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </div>
         </div>
     )

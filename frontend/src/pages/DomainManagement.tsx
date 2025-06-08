@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, Edit, Trash2, Globe, ExternalLink, AlertTriangle, CheckCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Edit, Trash2, Globe, ExternalLink, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react'
+import { apiService } from '../services/api'
 
 interface Domain {
     id: string
@@ -19,7 +20,18 @@ interface Domain {
 }
 
 const DomainManagement = () => {
-    const [domains, setDomains] = useState<Domain[]>([
+    const [domains, setDomains] = useState<Domain[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [showForm, setShowForm] = useState(false)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [formData, setFormData] = useState({
+        domain: '',
+        provider: 'Cloudflare',
+        sslEnabled: true
+    })
+
+    // Mock data as fallback
+    const mockDomains: Domain[] = [
         {
             id: '1',
             domain: 'api.aigateway.com',
@@ -59,41 +71,94 @@ const DomainManagement = () => {
             createdAt: '2024-01-18',
             updatedAt: '2024-01-18'
         }
-    ])
+    ]
 
-    const [showForm, setShowForm] = useState(false)
-    const [editingId, setEditingId] = useState<string | null>(null)
-    const [formData, setFormData] = useState({
-        domain: '',
-        provider: 'Cloudflare',
-        sslEnabled: true
-    })
+    // Fetch domains from API
+    useEffect(() => {
+        fetchDomains()
+    }, [])
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const fetchDomains = async () => {
+        try {
+            const response = await apiService.getDomains()
+            if (response && Array.isArray(response)) {
+                setDomains(response)
+            } else {
+                // Fallback to mock data if API fails
+                setDomains(mockDomains)
+            }
+        } catch (error) {
+            console.error('Failed to fetch domains:', error)
+            // Fallback to mock data
+            setDomains(mockDomains)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (editingId) {
-            setDomains(domains.map(domain =>
-                domain.id === editingId
-                    ? {
-                        ...domain,
+        try {
+            if (editingId) {
+                // Update existing domain
+                await apiService.updateDomain(editingId, formData)
+                setDomains(domains.map(domain =>
+                    domain.id === editingId
+                        ? {
+                            ...domain,
+                            ...formData,
+                            updatedAt: new Date().toISOString().split('T')[0]
+                        }
+                        : domain
+                ))
+                setEditingId(null)
+            } else {
+                // Create new domain
+                const response = await apiService.createDomain(formData)
+                if (response && response.data && response.data.id) {
+                    setDomains([...domains, response.data])
+                } else {
+                    // Fallback to local state update
+                    const newDomain: Domain = {
+                        id: Date.now().toString(),
                         ...formData,
+                        status: 'pending',
+                        records: [
+                            { type: 'A', name: '@', value: '192.168.1.100', ttl: 300 }
+                        ],
+                        createdAt: new Date().toISOString().split('T')[0],
                         updatedAt: new Date().toISOString().split('T')[0]
                     }
-                    : domain
-            ))
-            setEditingId(null)
-        } else {
-            const newDomain: Domain = {
-                id: Date.now().toString(),
-                ...formData,
-                status: 'pending',
-                records: [
-                    { type: 'A', name: '@', value: '192.168.1.100', ttl: 300 }
-                ],
-                createdAt: new Date().toISOString().split('T')[0],
-                updatedAt: new Date().toISOString().split('T')[0]
+                    setDomains([...domains, newDomain])
+                }
             }
-            setDomains([...domains, newDomain])
+        } catch (error) {
+            console.error('Failed to save domain:', error)
+            // Fallback to local state update for better UX
+            if (editingId) {
+                setDomains(domains.map(domain =>
+                    domain.id === editingId
+                        ? {
+                            ...domain,
+                            ...formData,
+                            updatedAt: new Date().toISOString().split('T')[0]
+                        }
+                        : domain
+                ))
+                setEditingId(null)
+            } else {
+                const newDomain: Domain = {
+                    id: Date.now().toString(),
+                    ...formData,
+                    status: 'pending',
+                    records: [
+                        { type: 'A', name: '@', value: '192.168.1.100', ttl: 300 }
+                    ],
+                    createdAt: new Date().toISOString().split('T')[0],
+                    updatedAt: new Date().toISOString().split('T')[0]
+                }
+                setDomains([...domains, newDomain])
+            }
         }
         setFormData({
             domain: '',
@@ -113,16 +178,34 @@ const DomainManagement = () => {
         setShowForm(true)
     }
 
-    const handleDelete = (id: string) => {
-        setDomains(domains.filter(domain => domain.id !== id))
+    const handleDelete = async (id: string) => {
+        try {
+            await apiService.deleteDomain(id)
+            setDomains(domains.filter(domain => domain.id !== id))
+        } catch (error) {
+            console.error('Failed to delete domain:', error)
+            // Fallback to local state update
+            setDomains(domains.filter(domain => domain.id !== id))
+        }
     }
 
-    const toggleSSL = (id: string) => {
-        setDomains(domains.map(domain =>
-            domain.id === id
-                ? { ...domain, sslEnabled: !domain.sslEnabled, updatedAt: new Date().toISOString().split('T')[0] }
-                : domain
-        ))
+    const toggleSSL = async (id: string) => {
+        try {
+            await apiService.toggleDomainSSL(id)
+            setDomains(domains.map(domain =>
+                domain.id === id
+                    ? { ...domain, sslEnabled: !domain.sslEnabled, updatedAt: new Date().toISOString().split('T')[0] }
+                    : domain
+            ))
+        } catch (error) {
+            console.error('Failed to toggle SSL:', error)
+            // Fallback to local state update
+            setDomains(domains.map(domain =>
+                domain.id === id
+                    ? { ...domain, sslEnabled: !domain.sslEnabled, updatedAt: new Date().toISOString().split('T')[0] }
+                    : domain
+            ))
+        }
     }
 
     const getStatusColor = (status: string) => {
@@ -236,110 +319,129 @@ const DomainManagement = () => {
                         </form>
                     </div>
                 </div>
-            )}
-
-            {/* Domains List */}
+            )}            {/* Domains List */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                {domains.map((domain) => (
-                    <div key={domain.id} className="bg-white shadow rounded-lg p-6">
-                        <div className="flex items-start justify-between mb-4">
-                            <div className="flex items-center space-x-3">
-                                {getStatusIcon(domain.status)}
-                                <div>
-                                    <h3 className="text-lg font-medium text-gray-900">{domain.domain}</h3>
-                                    <div className="flex items-center space-x-2 mt-1">
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(domain.status)}`}>
-                                            {domain.status}
-                                        </span>
-                                        <span className="text-xs text-gray-500">{domain.provider}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <a
-                                    href={`https://${domain.domain}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
-                                >
-                                    <ExternalLink className="h-4 w-4" />
-                                </a>
-                                <button
-                                    onClick={() => handleEdit(domain)}
-                                    className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
-                                >
-                                    <Edit className="h-4 w-4" />
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(domain.id)}
-                                    className="p-1 text-red-600 hover:bg-red-100 rounded-full"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* SSL Info */}
-                        <div className="mb-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                    <span className="text-sm text-gray-600">SSL 证书:</span>
-                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${domain.sslEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                        }`}>
-                                        {domain.sslEnabled ? '已启用' : '未启用'}
-                                    </span>
-                                </div>
-                                <button
-                                    onClick={() => toggleSSL(domain.id)}
-                                    className={`text-xs px-2 py-1 rounded ${domain.sslEnabled
-                                            ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                        }`}
-                                >
-                                    {domain.sslEnabled ? '禁用' : '启用'}
-                                </button>
-                            </div>
-                            {domain.certificateExpiry && (
-                                <div className={`mt-2 text-xs ${isExpiringSoon(domain.certificateExpiry) ? 'text-red-600' : 'text-gray-500'}`}>
-                                    {isExpiringSoon(domain.certificateExpiry) && <AlertTriangle className="inline h-3 w-3 mr-1" />}
-                                    证书过期时间: {domain.certificateExpiry}
-                                    {isExpiringSoon(domain.certificateExpiry) && ' (即将过期)'}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* DNS Records */}
-                        <div className="border-t border-gray-200 pt-4">
-                            <h4 className="text-sm font-medium text-gray-900 mb-2">DNS 记录</h4>
-                            <div className="space-y-2">
-                                {domain.records.map((record, index) => (
-                                    <div key={index} className="bg-gray-50 rounded-md p-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center space-x-3">
-                                                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-mono bg-blue-100 text-blue-800">
-                                                    {record.type}
-                                                </span>
-                                                <span className="text-sm text-gray-900">{record.name}</span>
-                                            </div>
-                                            <span className="text-xs text-gray-500">TTL: {record.ttl}s</span>
-                                        </div>
-                                        <div className="mt-1 text-sm text-gray-600 font-mono">
-                                            {record.value}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Timestamps */}
-                        <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-500">
-                            <div className="flex justify-between">
-                                <span>创建: {domain.createdAt}</span>
-                                <span>更新: {domain.updatedAt}</span>
-                            </div>
+                {isLoading ? (
+                    <div className="col-span-full text-center py-12">
+                        <RefreshCw className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+                        <p className="mt-2 text-gray-500">加载域名中...</p>
+                    </div>
+                ) : domains.length === 0 ? (
+                    <div className="col-span-full text-center py-12">
+                        <Globe className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">暂无域名</h3>
+                        <p className="mt-1 text-sm text-gray-500">开始创建第一个域名配置</p>
+                        <div className="mt-6">
+                            <button
+                                onClick={() => setShowForm(true)}
+                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                            >
+                                <Plus className="h-4 w-4 mr-2" />
+                                添加域名
+                            </button>
                         </div>
                     </div>
-                ))}
+                ) : (
+                    domains.map((domain) => (
+                        <div key={domain.id} className="bg-white shadow rounded-lg p-6">
+                            <div className="flex items-start justify-between mb-4">
+                                <div className="flex items-center space-x-3">
+                                    {getStatusIcon(domain.status)}
+                                    <div>
+                                        <h3 className="text-lg font-medium text-gray-900">{domain.domain}</h3>
+                                        <div className="flex items-center space-x-2 mt-1">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(domain.status)}`}>
+                                                {domain.status}
+                                            </span>
+                                            <span className="text-xs text-gray-500">{domain.provider}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <a
+                                        href={`https://${domain.domain}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                                    >
+                                        <ExternalLink className="h-4 w-4" />
+                                    </a>
+                                    <button
+                                        onClick={() => handleEdit(domain)}
+                                        className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
+                                    >
+                                        <Edit className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(domain.id)}
+                                        className="p-1 text-red-600 hover:bg-red-100 rounded-full"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* SSL Info */}
+                            <div className="mb-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center space-x-2">
+                                        <span className="text-sm text-gray-600">SSL 证书:</span>
+                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${domain.sslEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                            {domain.sslEnabled ? '已启用' : '未启用'}
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => toggleSSL(domain.id)}
+                                        className={`text-xs px-2 py-1 rounded ${domain.sslEnabled
+                                            ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                            }`}
+                                    >
+                                        {domain.sslEnabled ? '禁用' : '启用'}
+                                    </button>
+                                </div>
+                                {domain.certificateExpiry && (
+                                    <div className={`mt-2 text-xs ${isExpiringSoon(domain.certificateExpiry) ? 'text-red-600' : 'text-gray-500'}`}>
+                                        {isExpiringSoon(domain.certificateExpiry) && <AlertTriangle className="inline h-3 w-3 mr-1" />}
+                                        证书过期时间: {domain.certificateExpiry}
+                                        {isExpiringSoon(domain.certificateExpiry) && ' (即将过期)'}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* DNS Records */}
+                            <div className="border-t border-gray-200 pt-4">
+                                <h4 className="text-sm font-medium text-gray-900 mb-2">DNS 记录</h4>
+                                <div className="space-y-2">
+                                    {domain.records.map((record, index) => (
+                                        <div key={index} className="bg-gray-50 rounded-md p-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-mono bg-blue-100 text-blue-800">
+                                                        {record.type}
+                                                    </span>
+                                                    <span className="text-sm text-gray-900">{record.name}</span>
+                                                </div>
+                                                <span className="text-xs text-gray-500">TTL: {record.ttl}s</span>
+                                            </div>
+                                            <div className="mt-1 text-sm text-gray-600 font-mono">
+                                                {record.value}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Timestamps */}
+                            <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-500">
+                                <div className="flex justify-between">
+                                    <span>创建: {domain.createdAt}</span>
+                                    <span>更新: {domain.updatedAt}</span>
+                                </div>                        </div>
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     )

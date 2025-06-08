@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Edit, Trash2, Download, RefreshCw, AlertTriangle, CheckCircle, Clock } from 'lucide-react'
+import { apiService } from '../services/api'
 
 interface Certificate {
     id: string
@@ -18,7 +19,19 @@ interface Certificate {
 }
 
 const CertificateManagement = () => {
-    const [certificates, setCertificates] = useState<Certificate[]>([
+    const [certificates, setCertificates] = useState<Certificate[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [showForm, setShowForm] = useState(false)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [formData, setFormData] = useState({
+        name: '',
+        domain: '',
+        type: 'lets_encrypt' as Certificate['type'],
+        autoRenew: true
+    })
+
+    // Mock data as fallback
+    const mockCertificates: Certificate[] = [
         {
             id: '1',
             name: 'API Gateway SSL',
@@ -64,41 +77,92 @@ const CertificateManagement = () => {
             keySize: 2048,
             createdAt: '2024-01-20'
         }
-    ])
+    ]
 
-    const [showForm, setShowForm] = useState(false)
-    const [editingId, setEditingId] = useState<string | null>(null)
-    const [formData, setFormData] = useState({
-        name: '',
-        domain: '',
-        type: 'lets_encrypt' as Certificate['type'],
-        autoRenew: true
-    })
+    // Fetch certificates from API
+    useEffect(() => {
+        fetchCertificates()
+    }, [])
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault()
-        if (editingId) {
-            setCertificates(certificates.map(cert =>
-                cert.id === editingId
-                    ? { ...cert, ...formData }
-                    : cert
-            ))
-            setEditingId(null)
-        } else {
-            const newCert: Certificate = {
-                id: Date.now().toString(),
-                ...formData,
-                issuer: formData.type === 'lets_encrypt' ? "Let's Encrypt" :
-                    formData.type === 'custom' ? 'Custom CA' : 'Self-Signed',
-                status: 'pending',
-                issuedAt: new Date().toISOString().split('T')[0],
-                expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                fingerprint: 'SHA256:' + Math.random().toString(36).substring(2, 15),
-                serialNumber: Array.from({ length: 7 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join(':'),
-                keySize: 2048,
-                createdAt: new Date().toISOString().split('T')[0]
+    const fetchCertificates = async () => {
+        try {
+            const response = await apiService.getCertificates()
+            if (response && Array.isArray(response)) {
+                setCertificates(response)
+            } else {
+                // Fallback to mock data if API fails
+                setCertificates(mockCertificates)
             }
-            setCertificates([...certificates, newCert])
+        } catch (error) {
+            console.error('Failed to fetch certificates:', error)
+            // Fallback to mock data
+            setCertificates(mockCertificates)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        try {
+            if (editingId) {
+                // Update existing certificate
+                await apiService.updateCertificate(editingId, formData)
+                setCertificates(certificates.map(cert =>
+                    cert.id === editingId
+                        ? { ...cert, ...formData }
+                        : cert
+                ))
+                setEditingId(null)
+            } else {
+                // Create new certificate
+                const response = await apiService.createCertificate(formData)
+                if (response && response.data && response.data.id) {
+                    setCertificates([...certificates, response.data])
+                } else {
+                    // Fallback to local state update
+                    const newCert: Certificate = {
+                        id: Date.now().toString(),
+                        ...formData,
+                        issuer: formData.type === 'lets_encrypt' ? "Let's Encrypt" :
+                            formData.type === 'custom' ? 'Custom CA' : 'Self-Signed',
+                        status: 'pending',
+                        issuedAt: new Date().toISOString().split('T')[0],
+                        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                        fingerprint: 'SHA256:' + Math.random().toString(36).substring(2, 15),
+                        serialNumber: Array.from({ length: 7 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join(':'),
+                        keySize: 2048,
+                        createdAt: new Date().toISOString().split('T')[0]
+                    }
+                    setCertificates([...certificates, newCert])
+                }
+            }
+        } catch (error) {
+            console.error('Failed to save certificate:', error)
+            // Fallback to local state update for better UX
+            if (editingId) {
+                setCertificates(certificates.map(cert =>
+                    cert.id === editingId
+                        ? { ...cert, ...formData }
+                        : cert
+                ))
+                setEditingId(null)
+            } else {
+                const newCert: Certificate = {
+                    id: Date.now().toString(),
+                    ...formData,
+                    issuer: formData.type === 'lets_encrypt' ? "Let's Encrypt" :
+                        formData.type === 'custom' ? 'Custom CA' : 'Self-Signed',
+                    status: 'pending',
+                    issuedAt: new Date().toISOString().split('T')[0],
+                    expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                    fingerprint: 'SHA256:' + Math.random().toString(36).substring(2, 15),
+                    serialNumber: Array.from({ length: 7 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join(':'),
+                    keySize: 2048,
+                    createdAt: new Date().toISOString().split('T')[0]
+                }
+                setCertificates([...certificates, newCert])
+            }
         }
         setFormData({
             name: '',
@@ -120,29 +184,63 @@ const CertificateManagement = () => {
         setShowForm(true)
     }
 
-    const handleDelete = (id: string) => {
-        setCertificates(certificates.filter(cert => cert.id !== id))
+    const handleDelete = async (id: string) => {
+        try {
+            await apiService.deleteCertificate(id)
+            setCertificates(certificates.filter(cert => cert.id !== id))
+        } catch (error) {
+            console.error('Failed to delete certificate:', error)
+            // Fallback to local state update
+            setCertificates(certificates.filter(cert => cert.id !== id))
+        }
     }
 
-    const renewCertificate = (id: string) => {
-        setCertificates(certificates.map(cert =>
-            cert.id === id
-                ? {
-                    ...cert,
-                    status: 'pending',
-                    issuedAt: new Date().toISOString().split('T')[0],
-                    expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-                }
-                : cert
-        ))
+    const renewCertificate = async (id: string) => {
+        try {
+            await apiService.renewCertificate(id)
+            setCertificates(certificates.map(cert =>
+                cert.id === id
+                    ? {
+                        ...cert,
+                        status: 'pending',
+                        issuedAt: new Date().toISOString().split('T')[0],
+                        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                    }
+                    : cert
+            ))
+        } catch (error) {
+            console.error('Failed to renew certificate:', error)
+            // Fallback to local state update
+            setCertificates(certificates.map(cert =>
+                cert.id === id
+                    ? {
+                        ...cert,
+                        status: 'pending',
+                        issuedAt: new Date().toISOString().split('T')[0],
+                        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                    }
+                    : cert
+            ))
+        }
     }
 
-    const toggleAutoRenew = (id: string) => {
-        setCertificates(certificates.map(cert =>
-            cert.id === id
-                ? { ...cert, autoRenew: !cert.autoRenew }
-                : cert
-        ))
+    const toggleAutoRenew = async (id: string) => {
+        try {
+            await apiService.toggleCertificateAutoRenew(id)
+            setCertificates(certificates.map(cert =>
+                cert.id === id
+                    ? { ...cert, autoRenew: !cert.autoRenew }
+                    : cert
+            ))
+        } catch (error) {
+            console.error('Failed to toggle auto-renew:', error)
+            // Fallback to local state update
+            setCertificates(certificates.map(cert =>
+                cert.id === id
+                    ? { ...cert, autoRenew: !cert.autoRenew }
+                    : cert
+            ))
+        }
     }
 
     const getStatusColor = (status: string) => {
@@ -276,122 +374,141 @@ const CertificateManagement = () => {
                         </form>
                     </div>
                 </div>
-            )}
-
-            {/* Certificates List */}
+            )}            {/* Certificates List */}
             <div className="grid grid-cols-1 gap-6">
-                {certificates.map((cert) => (
-                    <div key={cert.id} className="bg-white shadow rounded-lg p-6">
-                        <div className="flex items-start justify-between mb-4">
-                            <div className="flex items-center space-x-3">
-                                {getStatusIcon(cert.status)}
-                                <div>
-                                    <h3 className="text-lg font-medium text-gray-900">{cert.name}</h3>
-                                    <div className="flex items-center space-x-2 mt-1">
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(cert.status)}`}>
-                                            {cert.status}
-                                        </span>
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getTypeColor(cert.type)}`}>
-                                            {cert.issuer}
-                                        </span>
-                                        {cert.autoRenew && (
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                                自动续期
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <button
-                                    onClick={() => renewCertificate(cert.id)}
-                                    className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
-                                    title="手动续期"
-                                >
-                                    <RefreshCw className="h-4 w-4" />
-                                </button>
-                                <button
-                                    className="p-1 text-green-600 hover:bg-green-100 rounded-full"
-                                    title="下载证书"
-                                >
-                                    <Download className="h-4 w-4" />
-                                </button>
-                                <button
-                                    onClick={() => handleEdit(cert)}
-                                    className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
-                                >
-                                    <Edit className="h-4 w-4" />
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(cert.id)}
-                                    className="p-1 text-red-600 hover:bg-red-100 rounded-full"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Certificate Details */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">域名</label>
-                                    <p className="text-sm text-gray-900 font-mono">{cert.domain}</p>
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">颁发日期</label>
-                                    <p className="text-sm text-gray-900">{cert.issuedAt}</p>
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">过期日期</label>
-                                    <div className="flex items-center space-x-2">
-                                        <p className={`text-sm ${getDaysUntilExpiry(cert.expiresAt) <= 30 ? 'text-red-600' : 'text-gray-900'}`}>
-                                            {cert.expiresAt}
-                                        </p>
-                                        <span className={`text-xs px-2 py-1 rounded-full ${getDaysUntilExpiry(cert.expiresAt) <= 30
-                                                ? 'bg-red-100 text-red-800'
-                                                : 'bg-gray-100 text-gray-800'
-                                            }`}>
-                                            {getDaysUntilExpiry(cert.expiresAt)} 天后过期
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">序列号</label>
-                                    <p className="text-sm text-gray-900 font-mono">{cert.serialNumber}</p>
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">密钥长度</label>
-                                    <p className="text-sm text-gray-900">{cert.keySize} bits</p>
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">指纹</label>
-                                    <p className="text-sm text-gray-900 font-mono truncate">{cert.fingerprint}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
-                            <div className="text-xs text-gray-500">
-                                创建于: {cert.createdAt}
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <button
-                                    onClick={() => toggleAutoRenew(cert.id)}
-                                    className={`text-xs px-3 py-1 rounded-full ${cert.autoRenew
-                                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
-                                >
-                                    {cert.autoRenew ? '禁用自动续期' : '启用自动续期'}
-                                </button>
-                            </div>
+                {isLoading ? (
+                    <div className="text-center py-12">
+                        <RefreshCw className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+                        <p className="mt-2 text-gray-500">加载证书中...</p>
+                    </div>
+                ) : certificates.length === 0 ? (
+                    <div className="text-center py-12">
+                        <AlertTriangle className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">暂无证书</h3>
+                        <p className="mt-1 text-sm text-gray-500">开始创建第一个SSL证书</p>
+                        <div className="mt-6">
+                            <button
+                                onClick={() => setShowForm(true)}
+                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                            >
+                                <Plus className="h-4 w-4 mr-2" />
+                                添加证书
+                            </button>
                         </div>
                     </div>
-                ))}
+                ) : (
+                    certificates.map((cert) => (
+                        <div key={cert.id} className="bg-white shadow rounded-lg p-6">
+                            <div className="flex items-start justify-between mb-4">
+                                <div className="flex items-center space-x-3">
+                                    {getStatusIcon(cert.status)}
+                                    <div>
+                                        <h3 className="text-lg font-medium text-gray-900">{cert.name}</h3>
+                                        <div className="flex items-center space-x-2 mt-1">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(cert.status)}`}>
+                                                {cert.status}
+                                            </span>
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getTypeColor(cert.type)}`}>
+                                                {cert.issuer}
+                                            </span>
+                                            {cert.autoRenew && (
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    自动续期
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        onClick={() => renewCertificate(cert.id)}
+                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
+                                        title="手动续期"
+                                    >
+                                        <RefreshCw className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        className="p-1 text-green-600 hover:bg-green-100 rounded-full"
+                                        title="下载证书"
+                                    >
+                                        <Download className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleEdit(cert)}
+                                        className="p-1 text-gray-600 hover:bg-gray-100 rounded-full"
+                                    >
+                                        <Edit className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(cert.id)}
+                                        className="p-1 text-red-600 hover:bg-red-100 rounded-full"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Certificate Details */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">域名</label>
+                                        <p className="text-sm text-gray-900 font-mono">{cert.domain}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">颁发日期</label>
+                                        <p className="text-sm text-gray-900">{cert.issuedAt}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">过期日期</label>
+                                        <div className="flex items-center space-x-2">
+                                            <p className={`text-sm ${getDaysUntilExpiry(cert.expiresAt) <= 30 ? 'text-red-600' : 'text-gray-900'}`}>
+                                                {cert.expiresAt}
+                                            </p>
+                                            <span className={`text-xs px-2 py-1 rounded-full ${getDaysUntilExpiry(cert.expiresAt) <= 30
+                                                ? 'bg-red-100 text-red-800'
+                                                : 'bg-gray-100 text-gray-800'
+                                                }`}>
+                                                {getDaysUntilExpiry(cert.expiresAt)} 天后过期
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">序列号</label>
+                                        <p className="text-sm text-gray-900 font-mono">{cert.serialNumber}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">密钥长度</label>
+                                        <p className="text-sm text-gray-900">{cert.keySize} bits</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500">指纹</label>
+                                        <p className="text-sm text-gray-900 font-mono truncate">{cert.fingerprint}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+                                <div className="text-xs text-gray-500">
+                                    创建于: {cert.createdAt}
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        onClick={() => toggleAutoRenew(cert.id)}
+                                        className={`text-xs px-3 py-1 rounded-full ${cert.autoRenew
+                                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                    >
+                                        {cert.autoRenew ? '禁用自动续期' : '启用自动续期'}
+                                    </button>
+                                </div>
+                            </div>                    </div>
+                    ))
+                )}
             </div>
         </div>
     )

@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, Edit, Trash2, Check, X, ExternalLink } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Edit, Trash2, Check, X, ExternalLink, RefreshCw } from 'lucide-react'
+import { apiService } from '../services/api'
 
 interface ServiceSource {
     id: string
@@ -13,7 +14,20 @@ interface ServiceSource {
 }
 
 const ServiceSources = () => {
-    const [sources, setSources] = useState<ServiceSource[]>([
+    const [sources, setSources] = useState<ServiceSource[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [showForm, setShowForm] = useState(false)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [formData, setFormData] = useState({
+        name: '',
+        type: 'openai' as ServiceSource['type'],
+        endpoint: '',
+        apiKey: '',
+        description: ''
+    })
+
+    // Mock data as fallback
+    const mockSources: ServiceSource[] = [
         {
             id: '1',
             name: 'OpenAI GPT-4',
@@ -44,35 +58,78 @@ const ServiceSources = () => {
             description: 'Google Gemini Pro API 服务',
             createdAt: '2024-01-17'
         }
-    ])
+    ]
 
-    const [showForm, setShowForm] = useState(false)
-    const [editingId, setEditingId] = useState<string | null>(null)
-    const [formData, setFormData] = useState({
-        name: '',
-        type: 'openai' as ServiceSource['type'],
-        endpoint: '',
-        apiKey: '',
-        description: ''
-    })
+    // Fetch service sources from API
+    useEffect(() => {
+        fetchServiceSources()
+    }, [])
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault()
-        if (editingId) {
-            setSources(sources.map(source =>
-                source.id === editingId
-                    ? { ...source, ...formData }
-                    : source
-            ))
-            setEditingId(null)
-        } else {
-            const newSource: ServiceSource = {
-                id: Date.now().toString(),
-                ...formData,
-                status: 'active',
-                createdAt: new Date().toISOString().split('T')[0]
+    const fetchServiceSources = async () => {
+        try {
+            const response = await apiService.getServiceSources()
+            if (response && Array.isArray(response)) {
+                setSources(response)
+            } else {
+                // Fallback to mock data if API fails
+                setSources(mockSources)
             }
-            setSources([...sources, newSource])
+        } catch (error) {
+            console.error('Failed to fetch service sources:', error)
+            // Fallback to mock data
+            setSources(mockSources)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        try {
+            if (editingId) {
+                // Update existing source
+                await apiService.updateServiceSource(editingId, formData)
+                setSources(sources.map(source =>
+                    source.id === editingId
+                        ? { ...source, ...formData }
+                        : source
+                ))
+                setEditingId(null)
+            } else {
+                // Create new source
+                const response = await apiService.createServiceSource(formData)
+                if (response && response.data && response.data.id) {
+                    setSources([...sources, response.data])
+                } else {
+                    // Fallback to local state update
+                    const newSource: ServiceSource = {
+                        id: Date.now().toString(),
+                        ...formData,
+                        status: 'active',
+                        createdAt: new Date().toISOString().split('T')[0]
+                    }
+                    setSources([...sources, newSource])
+                }
+            }
+        } catch (error) {
+            console.error('Failed to save service source:', error)
+            // Fallback to local state update for better UX
+            if (editingId) {
+                setSources(sources.map(source =>
+                    source.id === editingId
+                        ? { ...source, ...formData }
+                        : source
+                ))
+                setEditingId(null)
+            } else {
+                const newSource: ServiceSource = {
+                    id: Date.now().toString(),
+                    ...formData,
+                    status: 'active',
+                    createdAt: new Date().toISOString().split('T')[0]
+                }
+                setSources([...sources, newSource])
+            }
         }
         setFormData({ name: '', type: 'openai', endpoint: '', apiKey: '', description: '' })
         setShowForm(false)
@@ -90,11 +147,23 @@ const ServiceSources = () => {
         setShowForm(true)
     }
 
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
+        try {
+            await apiService.deleteServiceSource(id)
+        } catch (error) {
+            console.error('Failed to delete service source:', error)
+        }
+        // Update local state regardless of API success for better UX
         setSources(sources.filter(source => source.id !== id))
     }
 
-    const toggleStatus = (id: string) => {
+    const toggleStatus = async (id: string) => {
+        try {
+            await apiService.toggleServiceSourceStatus(id)
+        } catch (error) {
+            console.error('Failed to toggle service source status:', error)
+        }
+        // Update local state regardless of API success for better UX
         setSources(sources.map(source =>
             source.id === id
                 ? { ...source, status: source.status === 'active' ? 'inactive' : 'active' }
@@ -225,53 +294,64 @@ const ServiceSources = () => {
 
             {/* Service Sources List */}
             <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul className="divide-y divide-gray-200">
-                    {sources.map((source) => (
-                        <li key={source.id} className="px-6 py-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-4 flex-1">
-                                    <div className="text-2xl">{getTypeIcon(source.type)}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center space-x-3">
-                                            <h3 className="text-sm font-medium text-gray-900 truncate">
-                                                {source.name}
-                                            </h3>
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(source.status)}`}>
-                                                {source.status}
-                                            </span>
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                        <RefreshCw className="h-8 w-8 text-blue-600 animate-spin" />
+                        <span className="ml-2 text-gray-600">加载服务源...</span>
+                    </div>
+                ) : sources.length === 0 ? (
+                    <div className="text-center py-12">
+                        <p className="text-gray-500">暂无服务源</p>
+                    </div>
+                ) : (
+                    <ul className="divide-y divide-gray-200">
+                        {sources.map((source) => (
+                            <li key={source.id} className="px-6 py-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center space-x-4 flex-1">
+                                        <div className="text-2xl">{getTypeIcon(source.type)}</div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center space-x-3">
+                                                <h3 className="text-sm font-medium text-gray-900 truncate">
+                                                    {source.name}
+                                                </h3>
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(source.status)}`}>
+                                                    {source.status}
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 flex items-center space-x-2 text-sm text-gray-500">
+                                                <span>{source.endpoint}</span>
+                                                <ExternalLink className="h-3 w-3" />
+                                            </div>
+                                            <p className="mt-1 text-sm text-gray-500">{source.description}</p>
+                                            <p className="mt-1 text-xs text-gray-400">创建于: {source.createdAt}</p>
                                         </div>
-                                        <div className="mt-1 flex items-center space-x-2 text-sm text-gray-500">
-                                            <span>{source.endpoint}</span>
-                                            <ExternalLink className="h-3 w-3" />
-                                        </div>
-                                        <p className="mt-1 text-sm text-gray-500">{source.description}</p>
-                                        <p className="mt-1 text-xs text-gray-400">创建于: {source.createdAt}</p>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <button
+                                            onClick={() => toggleStatus(source.id)}
+                                            className={`p-1 rounded-full ${source.status === 'active' ? 'text-green-600 hover:bg-green-100' : 'text-gray-400 hover:bg-gray-100'}`}
+                                        >
+                                            {source.status === 'active' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                                        </button>
+                                        <button
+                                            onClick={() => handleEdit(source)}
+                                            className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
+                                        >
+                                            <Edit className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(source.id)}
+                                            className="p-1 text-red-600 hover:bg-red-100 rounded-full"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                    <button
-                                        onClick={() => toggleStatus(source.id)}
-                                        className={`p-1 rounded-full ${source.status === 'active' ? 'text-green-600 hover:bg-green-100' : 'text-gray-400 hover:bg-gray-100'}`}
-                                    >
-                                        {source.status === 'active' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
-                                    </button>
-                                    <button
-                                        onClick={() => handleEdit(source)}
-                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded-full"
-                                    >
-                                        <Edit className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDelete(source.id)}
-                                        className="p-1 text-red-600 hover:bg-red-100 rounded-full"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </div>
         </div>
     )

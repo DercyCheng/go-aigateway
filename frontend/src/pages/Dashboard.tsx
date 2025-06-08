@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts'
 import { Activity, Server, Users, AlertTriangle, Cpu, Zap } from 'lucide-react'
+import { apiService } from '../services/api'
 
 interface LocalModel {
     id: string;
@@ -18,18 +19,23 @@ const Dashboard = () => {
     })
 
     const [isLocalModelChecking, setIsLocalModelChecking] = useState(false)
+    const [healthData, setHealthData] = useState<any>(null)
 
     // Check if local model is running
     useEffect(() => {
+        /**
+         * Checks the status of local models by making an API call.
+         * Updates the stats state with whether any local model is running.
+         * Handles loading state and errors silently.
+         */
         const checkLocalModel = async () => {
             try {
                 setIsLocalModelChecking(true)
-                const response = await fetch('/api/local/models')
-                if (response.ok) {
-                    const data = await response.json()
-                    const anyModelRunning = data.models &&
-                        Array.isArray(data.models) &&
-                        data.models.some((model: LocalModel) => model.status === 'running')
+                const response = await apiService.getLocalModels()
+                if (response.success && response.data) {
+                    const anyModelRunning = response.data.models &&
+                        Array.isArray(response.data.models) &&
+                        response.data.models.some((model: LocalModel) => model.status === 'running')
                     setStats(prevStats => ({
                         ...prevStats,
                         localModelActive: anyModelRunning
@@ -42,9 +48,24 @@ const Dashboard = () => {
             }
         }
 
-        checkLocalModel()
+        const fetchHealth = async () => {
+            try {
+                const response = await apiService.healthCheck()
+                if (response.success) {
+                    setHealthData(response.data)
+                }
+            } catch (error) {
+                console.error('Error fetching health data:', error)
+            }
+        }
+
+        const fetchData = async () => {
+            await Promise.all([checkLocalModel(), fetchHealth()])
+        }
+
+        fetchData()
         // Check every 30 seconds
-        const interval = setInterval(checkLocalModel, 30000)
+        const interval = setInterval(fetchData, 30000)
         return () => clearInterval(interval)
     }, [])
 
@@ -244,6 +265,24 @@ const Dashboard = () => {
                     </div>
                 </div>
             </div>
+
+            {/* System Health Section */}
+            {healthData && (
+                <div className="bg-white shadow rounded-lg p-6">
+                    <h2 className="text-lg font-medium text-gray-900 mb-4">系统健康状态</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="border rounded-lg p-4 bg-purple-50">
+                            <h3 className="font-medium text-purple-800 mb-2 flex items-center">
+                                <Server className="h-5 w-5 mr-2" />
+                                系统状态
+                            </h3>
+                            <p className="text-sm text-purple-800">
+                                系统运行状态: <span className="font-bold">{healthData.status || '正常'}</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Local Model Info Section */}
             {stats.localModelActive && (
