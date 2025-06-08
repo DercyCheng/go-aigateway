@@ -1,0 +1,94 @@
+# 中国大陆优化版开发环境Dockerfile
+FROM golang:1.22-alpine AS builder
+
+# 设置时区为中国
+ENV TZ=Asia/Shanghai
+
+# 使用阿里云的Alpine镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+# 安装必要的依赖
+RUN apk update && apk add --no-cache \
+    git \
+    ca-certificates \
+    tzdata \
+    curl \
+    build-base \
+    && rm -rf /var/cache/apk/*
+
+# 设置Go模块代理为中国大陆源
+ENV GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy/,direct
+ENV GOSUMDB=sum.golang.google.cn
+ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOARCH=amd64
+
+WORKDIR /app
+
+# 复制go mod文件
+COPY go.mod go.sum ./
+
+# 下载依赖，使用国内代理
+RUN go mod download && go mod verify
+
+# 复制源代码
+COPY . .
+
+# 编译应用，添加版本信息和优化参数
+RUN go build \
+    -ldflags="-w -s -X main.Version=dev -X main.BuildTime=$(date -u +%Y%m%d.%H%M%S)" \
+    -trimpath \
+    -o /app/go-aigateway \
+    ./main.go
+
+# 最终镜像
+FROM alpine:latest
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+
+# 使用阿里云的Alpine镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+# 安装运行时依赖
+RUN apk update && apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    dumb-init \
+    && rm -rf /var/cache/apk/*
+
+# 设置时区
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
+# 创建非root用户
+RUN addgroup -g 1001 appgroup && \
+    adduser -D -u 1001 -G appgroup appuser
+
+# 创建必要的目录
+RUN mkdir -p /app/logs /app/config /app/tmp && \
+    chown -R appuser:appgroup /app
+
+WORKDIR /app
+
+# 从构建阶段复制二进制文件
+COPY --from=builder /app/go-aigateway ./go-aigateway
+COPY --chown=appuser:appgroup deployment/dev/.env.cn .env
+
+# 设置文件权限
+RUN chmod +x ./go-aigateway
+
+USER appuser
+
+# 暴露端口
+EXPOSE 8080 9090
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# 使用dumb-init启动应用
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["./go-aigateway"]

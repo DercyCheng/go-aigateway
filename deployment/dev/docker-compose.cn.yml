@@ -1,0 +1,173 @@
+# 中国大陆专用开发环境 Docker Compose 配置
+# 使用国内镜像源和服务优化
+
+services:
+  # AI网关主服务
+  go-aigateway:
+    build:
+      context: ../../
+      dockerfile: deployment/dev/Dockerfile.cn
+    container_name: go-aigateway-cn-dev
+    ports:
+      - "8080:8080"
+      - "9090:9090"  # Prometheus metrics
+    environment:
+      - APP_ENV=development
+      - TZ=Asia/Shanghai
+    env_file:
+      - .env.cn
+    volumes:
+      - ../../:/app/src  # 开发时代码热重载
+      - ./logs:/app/logs
+      - ./config:/app/config
+    depends_on:
+      - redis-cn
+      - postgres-cn
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  # Redis缓存服务 (使用官方镜像)
+  redis-cn:
+    image: redis:7-alpine
+    container_name: redis-cn-dev
+    ports:
+      - "6379:6379"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - redis_cn_data:/data
+      - ./redis.cn.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  # PostgreSQL数据库 (使用官方镜像)
+  postgres-cn:
+    image: postgres:15-alpine
+    container_name: postgres-cn-dev
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: aigateway_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    volumes:
+      - postgres_cn_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Python模型服务 (使用清华源)
+  python-model-cn:
+    build:
+      context: ../../python
+      dockerfile: ../deployment/dev/Dockerfile.python.cn
+    container_name: python-model-cn-dev
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - TZ=Asia/Shanghai
+      - PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+    volumes:
+      - ../../python:/app
+      - ./model_cache:/app/cache
+      - ./python_logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  # Prometheus监控 (使用官方镜像)
+  prometheus-cn:
+    image: prom/prometheus:latest
+    container_name: prometheus-cn-dev
+    ports:
+      - "9091:9090"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./prometheus.cn.yml:/etc/prometheus/prometheus.yml
+      - prometheus_cn_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+  # Grafana仪表板 (使用官方镜像)
+  grafana-cn:
+    image: grafana/grafana:latest
+    container_name: grafana-cn-dev
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - TZ=Asia/Shanghai
+    volumes:
+      - grafana_cn_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+  # Nginx反向代理 (用于处理CORS和SSL)
+  nginx-cn:
+    image: nginx:alpine
+    container_name: nginx-cn-dev
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./nginx/nginx.cn.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - go-aigateway
+    restart: unless-stopped
+    networks:
+      - aigateway-cn-network
+
+networks:
+  aigateway-cn-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  redis_cn_data:
+  postgres_cn_data:
+  prometheus_cn_data:
+  grafana_cn_data:
