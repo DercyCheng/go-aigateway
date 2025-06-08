@@ -335,5 +335,12 @@ func (po *PerformanceOptimizer) getRequestCount() int64 {
 func (po *PerformanceOptimizer) GetMetrics() PerformanceMetrics {
 	po.metrics.mutex.RLock()
 	defer po.metrics.mutex.RUnlock()
-	return *po.metrics
+	// Create a copy without the mutex to avoid the "return copies lock value" error
+	return PerformanceMetrics{
+		RequestCount:   po.metrics.RequestCount,
+		TotalDuration:  po.metrics.TotalDuration,
+		CacheHits:      po.metrics.CacheHits,
+		CacheMisses:    po.metrics.CacheMisses,
+		CompressionUse: po.metrics.CompressionUse,
+	}
 }

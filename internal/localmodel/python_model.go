@@ -330,10 +330,16 @@ func (pms *PythonModelServer) retryRequest(ctx context.Context, url string, requ
 		if resp != nil {
 			resp.Body.Close()
 		}
+
+		// If this is the last attempt and we got an error
+		if attempt == pms.config.RetryAttempts-1 && err != nil {
+			return nil, fmt.Errorf("failed to send request after %d attempts: %w", pms.config.RetryAttempts, err)
+		}
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request after %d attempts: %w", pms.config.RetryAttempts, err)
+	// If we get here without a valid response, all attempts failed
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server request failed after %d attempts", pms.config.RetryAttempts)
 	}
 
 	if resp.StatusCode != http.StatusOK {
