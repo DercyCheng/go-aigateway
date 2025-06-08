@@ -39,9 +39,9 @@ func main() {
 	// Initialize services
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	// Initialize Redis client
 	var redisClientInstance *redisClient.Client
+	var err error
 	if cfg.Redis.Enabled {
 		redisConfig := &redisClient.Config{
 			Addr:     cfg.Redis.Addr,
@@ -49,7 +49,10 @@ func main() {
 			DB:       cfg.Redis.DB,
 			PoolSize: cfg.Redis.PoolSize,
 		}
-		redisClientInstance = redisClient.NewClient(redisConfig)
+		redisClientInstance, err = redisClient.NewClient(redisConfig)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize Redis client")
+		}
 
 		// Start Redis health check
 		go redisClientInstance.StartHealthCheck(ctx)
@@ -143,13 +146,17 @@ func main() {
 	}
 
 	// Setup Gin mode
-	gin.SetMode(cfg.GinMode)
-	// Initialize router
+	gin.SetMode(cfg.GinMode) // Initialize router
 	r := gin.New()
-	// Add middleware
+
+	// Add basic middleware
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
-	r.Use(middleware.CORS(cfg)) // Pass config to CORS middleware
+
+	// Add security middleware
+	r.Use(middleware.RequestTimeout(30 * time.Second))
+	r.Use(middleware.RequestSizeLimit(10 * 1024 * 1024)) // 10MB limit
+	r.Use(middleware.CORS(cfg))                          // Pass config to CORS middleware
 	r.Use(middleware.PrometheusMetrics())
 
 	// Use Redis rate limiter if available, otherwise use memory-based limiter

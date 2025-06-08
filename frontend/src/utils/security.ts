@@ -63,22 +63,25 @@ export class SecurityError extends Error {
 // Input validation utilities
 const validateInputImpl = {
     email: (email: string): boolean => {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return emailRegex.test(email);
+        if (!email || typeof email !== 'string') return false;
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        return emailRegex.test(email) && email.length <= 254;
     },
 
     url: (url: string): boolean => {
+        if (!url || typeof url !== 'string') return false;
         try {
-            new URL(url);
-            return true;
+            const urlObj = new URL(url);
+            return ['http:', 'https:'].includes(urlObj.protocol);
         } catch {
             return false;
         }
     },
 
     apiKey: (key: string): boolean => {
-        // Basic API key validation
-        return key.length >= 10 && /^[a-zA-Z0-9_-]+$/.test(key);
+        if (!key || typeof key !== 'string') return false;
+        // API key should be at least 16 chars and contain only safe characters
+        return key.length >= 16 && key.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(key);
     },
 
     port: (port: string | number): boolean => {
@@ -86,16 +89,46 @@ const validateInputImpl = {
         return !isNaN(portNum) && portNum > 0 && portNum <= 65535;
     },
 
+    username: (username: string): boolean => {
+        if (!username || typeof username !== 'string') return false;
+        // Username: 3-50 chars, alphanumeric + underscore/dash
+        return /^[a-zA-Z0-9_-]{3,50}$/.test(username);
+    },
+
+    password: (password: string): boolean => {
+        if (!password || typeof password !== 'string') return false;
+        // Password: at least 8 chars, with complexity requirements
+        return password.length >= 8 &&
+            password.length <= 128 &&
+            /(?=.*[a-z])/.test(password) && // lowercase
+            /(?=.*[A-Z])/.test(password) && // uppercase  
+            /(?=.*\d)/.test(password); // digit
+    },
+
     sanitizeString: (input: string): string => {
-        // Remove potentially dangerous characters
-        return input
-            .replace(/[<>\"']/g, '') // Remove HTML/script injection chars
-            .replace(/\0/g, '') // Remove null bytes
-            .trim();
+        if (typeof input !== 'string') return '';
+        return securityUtilsImpl.sanitizeInput(input);
     },
 
     validateLength: (input: string, min: number = 0, max: number = 1000): boolean => {
-        return input.length >= min && input.length <= max;
+        return typeof input === 'string' && input.length >= min && input.length <= max;
+    },
+
+    // Validate against common injection patterns
+    isSecureInput: (input: string): boolean => {
+        if (typeof input !== 'string') return false;
+
+        const dangerousPatterns = [
+            /<script/i,
+            /javascript:/i,
+            /vbscript:/i,
+            /on\w+\s*=/i,
+            /data:/i,
+            /eval\s*\(/i,
+            /expression\s*\(/i
+        ];
+
+        return !dangerousPatterns.some(pattern => pattern.test(input));
     }
 };
 
@@ -258,59 +291,6 @@ export const useApiError = () => {
     };
 };
 
-// Rate limiting hook
-export const useRateLimit = (maxRequests: number = 10, windowMs: number = 60000) => {
-    const [requests, setRequests] = useState<number[]>([]);
-
-    const canMakeRequest = (): boolean => {
-        const now = Date.now();
-        const windowStart = now - windowMs;
-
-        // Filter out old requests
-        const recentRequests = requests.filter(timestamp => timestamp > windowStart);
-
-        return recentRequests.length < maxRequests;
-    };
-
-    const recordRequest = (): boolean => {
-        if (!canMakeRequest()) {
-            return false;
-        }
-
-        const now = Date.now();
-        setRequests(prev => {
-            const windowStart = now - windowMs;
-            const recentRequests = prev.filter(timestamp => timestamp > windowStart);
-            return [...recentRequests, now];
-        });
-
-        return true;
-    };
-
-    const getRemainingRequests = (): number => {
-        const now = Date.now();
-        const windowStart = now - windowMs;
-        const recentRequests = requests.filter(timestamp => timestamp > windowStart);
-        return Math.max(0, maxRequests - recentRequests.length);
-    };
-
-    const getTimeUntilReset = (): number => {
-        if (requests.length === 0) return 0;
-
-        const oldestRequest = Math.min(...requests);
-        const timeUntilReset = (oldestRequest + windowMs) - Date.now();
-
-        return Math.max(0, timeUntilReset);
-    };
-
-    return {
-        canMakeRequest,
-        recordRequest,
-        getRemainingRequests,
-        getTimeUntilReset
-    };
-};
-
 // Content Security Policy utilities
 const cspUtilsImpl = {
     generateNonce: (): string => {
@@ -463,3 +443,105 @@ const auditLogImpl = {
 };
 
 export { auditLogImpl as auditLog };
+
+// Enhanced input sanitization and security utilities
+const securityUtilsImpl = {
+    // XSS prevention - sanitize HTML input
+    sanitizeHTML: (input: string): string => {
+        const div = document.createElement('div');
+        div.textContent = input;
+        return div.innerHTML;
+    },
+
+    // Remove script tags and javascript protocols
+    removeScriptTags: (input: string): string => {
+        return input
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/javascript:/gi, '')
+            .replace(/vbscript:/gi, '')
+            .replace(/on\w+\s*=/gi, '');
+    },
+
+    // Comprehensive input sanitization
+    sanitizeInput: (input: string): string => {
+        if (typeof input !== 'string') {
+            return '';
+        }
+
+        return input
+            .trim()
+            .replace(/[<>]/g, '') // Remove angle brackets
+            .replace(/&/g, '&amp;') // Escape ampersands
+            .replace(/"/g, '&quot;') // Escape quotes
+            .replace(/'/g, '&#x27;') // Escape single quotes
+            .replace(/\//g, '&#x2F;') // Escape forward slashes
+            .replace(/\0/g, '') // Remove null bytes
+            .replace(/[\x00-\x1F\x7F]/g, ''); // Remove control characters
+    },
+
+    // Validate and sanitize URL
+    sanitizeURL: (url: string): string | null => {
+        try {
+            const urlObj = new URL(url);
+            // Only allow http and https protocols
+            if (!['http:', 'https:'].includes(urlObj.protocol)) {
+                return null;
+            }
+            return urlObj.toString();
+        } catch {
+            return null;
+        }
+    },
+
+    // Generate secure random strings for CSRF tokens
+    generateSecureToken: (length: number = 32): string => {
+        const array = new Uint8Array(length);
+        crypto.getRandomValues(array);
+        return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    },
+
+    // Validate file upload security
+    validateFileUpload: (file: File, allowedTypes: string[], maxSize: number): boolean => {
+        // Check file type
+        if (!allowedTypes.includes(file.type)) {
+            return false;
+        }
+
+        // Check file size
+        if (file.size > maxSize) {
+            return false;
+        }
+
+        // Check file extension
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        const allowedExtensions = allowedTypes.map(type => type.split('/')[1]);
+
+        return extension ? allowedExtensions.includes(extension) : false;
+    },
+
+    // Rate limiting for client-side
+    createRateLimiter: (maxRequests: number, windowMs: number) => {
+        const requests: number[] = [];
+
+        return (): boolean => {
+            const now = Date.now();
+            const windowStart = now - windowMs;
+
+            // Remove old requests
+            while (requests.length > 0 && requests[0] < windowStart) {
+                requests.shift();
+            }
+
+            // Check if under limit
+            if (requests.length >= maxRequests) {
+                return false;
+            }
+
+            // Add current request
+            requests.push(now);
+            return true;
+        };
+    }
+};
+
+export { securityUtilsImpl as securityUtils };

@@ -244,11 +244,10 @@ func TestRateLimiting(t *testing.T) {
 
 func TestCSRFProtection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
 	config := &Config{
 		MaxRequestSize:   1024,
 		RateLimitEnabled: false,
-		CSRFEnabled:      true,
+		CSRFProtection:   true,
 		XSSProtection:    false,
 		SecureHeaders:    false,
 		AuditLogging:     false,

@@ -3,8 +3,10 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/middleware"
+	"go-aigateway/internal/security"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +14,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	MaxRequestBodySize = 10 * 1024 * 1024 // 10MB
+	RequestTimeout     = 30 * time.Second
 )
 
 // HealthCheck handler
@@ -49,8 +56,21 @@ func Models(cfg *config.Config) gin.HandlerFunc {
 func proxyRequest(c *gin.Context, cfg *config.Config, endpoint string) {
 	start := time.Now()
 
-	// Read request body
-	body, err := io.ReadAll(c.Request.Body)
+	// Validate request body size
+	if c.Request.ContentLength > MaxRequestBodySize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": gin.H{
+				"message": fmt.Sprintf("Request body too large. Maximum size is %d bytes", MaxRequestBodySize),
+				"type":    "validation_error",
+				"code":    "request_too_large",
+			},
+		})
+		return
+	}
+
+	// Read request body with size limit
+	limitedReader := http.MaxBytesReader(c.Writer, c.Request.Body, MaxRequestBodySize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to read request body")
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -63,8 +83,40 @@ func proxyRequest(c *gin.Context, cfg *config.Config, endpoint string) {
 		return
 	}
 
+	// Validate JSON if content type is JSON
+	if strings.Contains(c.GetHeader("Content-Type"), "application/json") && len(body) > 0 {
+		var jsonData interface{}
+		if err := json.Unmarshal(body, &jsonData); err != nil {
+			logrus.WithError(err).Error("Invalid JSON in request body")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"message": "Invalid JSON format",
+					"type":    "validation_error",
+					"code":    "invalid_json",
+				},
+			})
+			return
+		}
+	}
+
+	// Sanitize endpoint parameter
+	endpoint = security.SanitizeInput(endpoint)
+
 	// Create target URL
 	targetURL := strings.TrimSuffix(cfg.TargetURL, "/") + endpoint
+
+	// Validate target URL
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		logrus.WithField("target_url", targetURL).Error("Invalid target URL")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"message": "Invalid target configuration",
+				"type":    "configuration_error",
+				"code":    "invalid_target",
+			},
+		})
+		return
+	}
 
 	// Create new request
 	req, err := http.NewRequest(c.Request.Method, targetURL, bytes.NewBuffer(body))

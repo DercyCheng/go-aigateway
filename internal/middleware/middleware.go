@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -311,17 +312,48 @@ func LocalAuth(localAuth *security.LocalAuthenticator, requiredPermission string
 	}
 }
 
-// Rate limiter middleware
+// Rate limiter middleware with cleanup
 type rateLimiter struct {
 	requests map[string][]time.Time
 	mutex    sync.RWMutex
 	limit    int
+	cleanup  *time.Ticker
 }
 
 func newRateLimiter(limit int) *rateLimiter {
-	return &rateLimiter{
+	rl := &rateLimiter{
 		requests: make(map[string][]time.Time),
 		limit:    limit,
+		cleanup:  time.NewTicker(5 * time.Minute), // Cleanup every 5 minutes
+	}
+
+	// Start cleanup goroutine
+	go rl.cleanupOldEntries()
+
+	return rl
+}
+
+func (rl *rateLimiter) cleanupOldEntries() {
+	for range rl.cleanup.C {
+		rl.mutex.Lock()
+		now := time.Now()
+		windowStart := now.Add(-time.Minute)
+
+		for ip, requests := range rl.requests {
+			validRequests := make([]time.Time, 0)
+			for _, reqTime := range requests {
+				if reqTime.After(windowStart) {
+					validRequests = append(validRequests, reqTime)
+				}
+			}
+
+			if len(validRequests) == 0 {
+				delete(rl.requests, ip)
+			} else {
+				rl.requests[ip] = validRequests
+			}
+		}
+		rl.mutex.Unlock()
 	}
 }
 
@@ -383,4 +415,36 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// Request timeout middleware
+func RequestTimeout(timeout time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
+
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// Request body size limit middleware
+func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > maxSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": gin.H{
+					"message": "Request body too large",
+					"type":    "validation_error",
+					"code":    "request_too_large",
+				},
+			})
+			c.Abort()
+			return
+		}
+
+		// Set limit for reading request body
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize)
+		c.Next()
+	}
 }

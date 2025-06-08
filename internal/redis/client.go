@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -10,10 +12,33 @@ import (
 
 // Config Redis配置
 type Config struct {
-	Addr     string
-	Password string
-	DB       int
-	PoolSize int
+	Addr         string
+	Password     string
+	DB           int
+	PoolSize     int
+	MaxRetries   int
+	MinIdleConns int
+	DialTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	PoolTimeout  time.Duration
+	TLSConfig    *tls.Config
+}
+
+// DefaultConfig returns default Redis configuration
+func DefaultConfig() *Config {
+	return &Config{
+		Addr:         "localhost:6379",
+		Password:     "",
+		DB:           0,
+		PoolSize:     10,
+		MaxRetries:   3,
+		MinIdleConns: 5,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+		PoolTimeout:  4 * time.Second,
+	}
 }
 
 // Client Redis客户端管理器
@@ -23,18 +48,40 @@ type Client struct {
 }
 
 // NewClient 创建Redis客户端
-func NewClient(config *Config) *Client {
+func NewClient(config *Config) (*Client, error) {
+	if config == nil {
+		config = DefaultConfig()
+	}
+
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     config.Addr,
-		Password: config.Password,
-		DB:       config.DB,
-		PoolSize: config.PoolSize,
+		Addr:         config.Addr,
+		Password:     config.Password,
+		DB:           config.DB,
+		PoolSize:     config.PoolSize,
+		MaxRetries:   config.MaxRetries,
+		MinIdleConns: config.MinIdleConns,
+		DialTimeout:  config.DialTimeout,
+		ReadTimeout:  config.ReadTimeout,
+		WriteTimeout: config.WriteTimeout,
+		PoolTimeout:  config.PoolTimeout,
+		TLSConfig:    config.TLSConfig,
 	})
 
-	return &Client{
+	client := &Client{
 		Client: rdb,
 		config: config,
 	}
+
+	// Test connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.HealthCheck(ctx); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	logrus.WithField("addr", config.Addr).Info("Redis client connected successfully")
+	return client, nil
 }
 
 // HealthCheck Redis健康检查
@@ -64,7 +111,18 @@ func (c *Client) StartHealthCheck(ctx context.Context) {
 	}
 }
 
-// Close 关闭Redis连接
+// GetStats returns Redis client statistics
+func (c *Client) GetStats() *redis.PoolStats {
+	return c.PoolStats()
+}
+
+// Close gracefully closes the Redis connection
 func (c *Client) Close() error {
+	logrus.Info("Closing Redis connection")
 	return c.Client.Close()
+}
+
+// IsConnected checks if Redis is currently connected
+func (c *Client) IsConnected(ctx context.Context) bool {
+	return c.HealthCheck(ctx) == nil
 }

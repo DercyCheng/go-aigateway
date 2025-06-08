@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"go-aigateway/internal/security"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // LoginRequest represents the login request payload
@@ -47,20 +49,67 @@ func Login(localAuth *security.LocalAuthenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req LoginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"message": "Invalid request format",
+					"type":    "validation_error",
+					"code":    "invalid_format",
+				},
+			})
 			return
 		}
+
+		// Sanitize inputs
+		req.Username = security.SanitizeInput(strings.TrimSpace(req.Username))
+		req.Password = strings.TrimSpace(req.Password)
+
+		// Validate input lengths
+		if len(req.Username) < 3 || len(req.Username) > 50 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"message": "Username must be between 3 and 50 characters",
+					"type":    "validation_error",
+					"code":    "invalid_username_length",
+				},
+			})
+			return
+		}
+		if len(req.Password) < 6 || len(req.Password) > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"message": "Password must be between 6 and 100 characters",
+					"type":    "validation_error",
+					"code":    "invalid_password_length",
+				},
+			})
+			return
+		}
+
 		// Authenticate user
 		user, err := localAuth.AuthenticateUser(req.Username, req.Password)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+			logrus.WithError(err).WithField("username", req.Username).Warn("Authentication failed")
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{
+					"message": "Invalid credentials",
+					"type":    "authentication_error",
+					"code":    "invalid_credentials",
+				},
+			})
 			return
 		}
 
 		// Generate JWT token
 		token, err := localAuth.GenerateJWT(user.ID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			logrus.WithError(err).Error("Failed to generate JWT token")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"message": "Failed to generate token",
+					"type":    "internal_server_error",
+					"code":    "token_generation_failed",
+				},
+			})
 			return
 		}
 
