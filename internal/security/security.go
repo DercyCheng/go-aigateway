@@ -177,21 +177,29 @@ func NewInputSanitizer() *InputSanitizer {
 	}
 }
 
-// SanitizeString removes potentially dangerous characters
-func (is *InputSanitizer) SanitizeString(input string) string {
-	// Remove null bytes
-	input = strings.ReplaceAll(input, "\x00", "")
+// SanitizeInput removes dangerous HTML/script and javascript: protocol
+func (is *InputSanitizer) SanitizeInput(input string) string {
+	// Remove <script>...</script> tags
+	reScript := regexp.MustCompile(`(?is)<script.*?>.*?</script>`) // case-insensitive, dot matches newline
+	input = reScript.ReplaceAllString(input, "")
 
-	// Remove control characters except tab, newline, and carriage return
-	var result strings.Builder
-	for _, r := range input {
-		if unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r' {
-			continue
-		}
-		result.WriteRune(r)
-	}
+	// Remove javascript: protocol
+	reJS := regexp.MustCompile(`(?i)javascript:[^\s'"]*`)
+	input = reJS.ReplaceAllString(input, "")
 
-	return result.String()
+	// Escape HTML entities for all tags
+	reHTML := regexp.MustCompile(`<[^>]+>`)
+	input = reHTML.ReplaceAllStringFunc(input, func(s string) string {
+		replacer := strings.NewReplacer(
+			"<", "&lt;",
+			">", "&gt;",
+			"\"", "&quot;",
+			"'", "&#39;",
+		)
+		return replacer.Replace(s)
+	})
+
+	return input
 }
 
 // ValidateEmail validates email format
@@ -273,8 +281,10 @@ func (ph *PasswordHasher) HashPassword(password string) (string, error) {
 
 // VerifyPassword verifies a password against its hash
 func (ph *PasswordHasher) VerifyPassword(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+		return false
+	}
+	return true
 }
 
 // SecureCompare performs constant-time string comparison
@@ -284,11 +294,22 @@ func SecureCompare(a, b string) bool {
 
 // GenerateSecureToken generates a cryptographically secure random token
 func GenerateSecureToken(length int) (string, error) {
+	if length <= 0 {
+		length = 32
+	}
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", errors.Wrap(errors.ErrCodeSecurity, "Failed to generate secure token", err)
 	}
-	return base64.URLEncoding.EncodeToString(bytes), nil
+	// Use raw URL encoding, then trim/pad to length*2 (base64 expands by ~4/3)
+	token := base64.RawURLEncoding.EncodeToString(bytes)
+	if len(token) < length*2 {
+		// pad with random chars if needed
+		pad := make([]byte, length*2-len(token))
+		rand.Read(pad)
+		token += base64.RawURLEncoding.EncodeToString(pad)
+	}
+	return token[:length*2], nil
 }
 
 // SessionManager manages secure sessions

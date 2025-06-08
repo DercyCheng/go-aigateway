@@ -21,6 +21,31 @@ help: ## Show this help message
 # Development targets
 build: ## Build the application
 	@echo "Building $(APP_NAME)..."
+	@mkdir -p build
+	@go build -o build/$(APP_NAME) main.go
+
+# Local deployment targets
+local-setup: env deps ## Setup local deployment environment
+	@echo "Setting up local deployment environment..."
+	@mkdir -p python/model logs data/local
+	@python -m pip install --upgrade pip
+	@python -m pip install flask==2.3.3 transformers==4.36.2 torch==2.1.0 sentencepiece==0.1.99 accelerate==0.25.0 psutil
+	@if [ ! -f .env.local ]; then cp .env.local .env || cp .env.example .env.local; fi
+	@echo "Local environment setup complete!"
+
+local-run: build ## Run the application in local mode
+	@echo "Starting $(APP_NAME) in local mode..."
+	@LOCAL_MODEL_ENABLED=true LOCAL_AUTH_ENABLED=true ./build/$(APP_NAME)
+
+local-start: ## Start local deployment (Linux/macOS)
+	@echo "Starting local deployment..."
+	@chmod +x start-local.sh
+	@./start-local.sh
+
+local-start-windows: ## Start local deployment (Windows)
+	@echo "Starting local deployment on Windows..."
+	@start-local.bat
+	@echo "Building $(APP_NAME)..."
 	@mkdir -p build/
 	@CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -a -installsuffix cgo -o build/$(APP_NAME) .
 

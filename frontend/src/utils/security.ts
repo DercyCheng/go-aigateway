@@ -16,39 +16,52 @@ export interface ErrorState {
 
 // Custom error classes
 export class ValidationError extends Error {
+    public field?: string;
+    public code: string;
+
     constructor(
         message: string,
-        public field?: string,
-        public code: string = 'VALIDATION_ERROR'
+        field?: string,
+        code: string = 'VALIDATION_ERROR'
     ) {
         super(message);
         this.name = 'ValidationError';
+        this.field = field;
+        this.code = code;
     }
 }
 
 export class NetworkError extends Error {
+    public statusCode?: number;
+    public code: string;
+
     constructor(
         message: string,
-        public statusCode?: number,
-        public code: string = 'NETWORK_ERROR'
+        statusCode?: number,
+        code: string = 'NETWORK_ERROR'
     ) {
         super(message);
         this.name = 'NetworkError';
+        this.statusCode = statusCode;
+        this.code = code;
     }
 }
 
 export class SecurityError extends Error {
+    public code: string;
+
     constructor(
         message: string,
-        public code: string = 'SECURITY_ERROR'
+        code: string = 'SECURITY_ERROR'
     ) {
         super(message);
         this.name = 'SecurityError';
+        this.code = code;
     }
 }
 
 // Input validation utilities
-export const validateInput = {
+const validateInputImpl = {
     email: (email: string): boolean => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return emailRegex.test(email);
@@ -86,8 +99,10 @@ export const validateInput = {
     }
 };
 
+export { validateInputImpl as validateInput };
+
 // Secure data handling
-export const secureStorage = {
+const secureStorageImpl = {
     setItem: (key: string, value: any): void => {
         try {
             // Encrypt sensitive data before storing (in a real app, use proper encryption)
@@ -129,6 +144,8 @@ export const secureStorage = {
         });
     }
 };
+
+export { secureStorageImpl as secureStorage };
 
 // Error boundary hook
 export const useErrorBoundary = () => {
@@ -295,7 +312,7 @@ export const useRateLimit = (maxRequests: number = 10, windowMs: number = 60000)
 };
 
 // Content Security Policy utilities
-export const cspUtils = {
+const cspUtilsImpl = {
     generateNonce: (): string => {
         const array = new Uint8Array(16);
         crypto.getRandomValues(array);
@@ -325,8 +342,10 @@ export const cspUtils = {
     }
 };
 
+export { cspUtilsImpl as cspUtils };
+
 // Form validation utilities
-export const formValidation = {
+const formValidationImpl = {
     validateRequired: (value: any, fieldName: string): ValidationError | null => {
         if (value === null || value === undefined || value === '') {
             return new ValidationError(`${fieldName} is required`, fieldName);
@@ -335,14 +354,14 @@ export const formValidation = {
     },
 
     validateEmail: (email: string, fieldName: string = 'email'): ValidationError | null => {
-        if (!validateInput.email(email)) {
+        if (!validateInputImpl.email(email)) {
             return new ValidationError('Invalid email format', fieldName);
         }
         return null;
     },
 
     validateURL: (url: string, fieldName: string = 'url'): ValidationError | null => {
-        if (!validateInput.url(url)) {
+        if (!validateInputImpl.url(url)) {
             return new ValidationError('Invalid URL format', fieldName);
         }
         return null;
@@ -354,7 +373,7 @@ export const formValidation = {
         max: number,
         fieldName: string
     ): ValidationError | null => {
-        if (!validateInput.validateLength(value, min, max)) {
+        if (!validateInputImpl.validateLength(value, min, max)) {
             return new ValidationError(
                 `${fieldName} must be between ${min} and ${max} characters`,
                 fieldName
@@ -384,6 +403,8 @@ export const formValidation = {
     }
 };
 
+export { formValidationImpl as formValidation };
+
 // Security headers validation
 export const validateSecurityHeaders = (response: Response): void => {
     const requiredHeaders = [
@@ -402,7 +423,7 @@ export const validateSecurityHeaders = (response: Response): void => {
 };
 
 // Audit logging
-export const auditLog = {
+const auditLogImpl = {
     logSecurityEvent: (event: string, details: Record<string, any> = {}) => {
         const logEntry = {
             timestamp: new Date().toISOString(),
@@ -440,3 +461,5 @@ export const auditLog = {
         // In a real application, send this to your error tracking service
     }
 };
+
+export { auditLogImpl as auditLog };

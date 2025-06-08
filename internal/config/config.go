@@ -146,8 +146,15 @@ func New() *Config {
 	return &Config{
 		Port:      getEnv("PORT", "8080"),
 		GinMode:   getEnv("GIN_MODE", "release"),
-		TargetURL: getEnv("TARGET_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-		TargetKey: getEnv("TARGET_API_KEY", ""), GatewayKeys: strings.Split(getEnv("GATEWAY_API_KEYS", ""), ","),
+		TargetURL: getEnv("TARGET_URL", getEnv("TARGET_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")),
+		TargetKey: getEnv("TARGET_KEY", getEnv("TARGET_API_KEY", "")),
+		GatewayKeys: func() []string {
+			keys := getEnv("GATEWAY_API_KEYS", "")
+			if keys == "" {
+				return []string{}
+			}
+			return strings.Split(keys, ",")
+		}(),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		LogFormat:      getEnv("LOG_FORMAT", "json"),
 		RateLimit:      getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
@@ -195,12 +202,11 @@ func New() *Config {
 			RoleArn:         getEnv("RAM_ROLE_ARN", ""),
 			PolicyDocument:  getEnv("RAM_POLICY_DOCUMENT", ""),
 			CacheExpiration: getEnvDuration("RAM_CACHE_EXPIRATION", 15*time.Minute),
-		},
-		CloudIntegration: CloudIntegrationConfig{
+		}, CloudIntegration: CloudIntegrationConfig{
 			Enabled:       getEnvBool("CLOUD_INTEGRATION_ENABLED", false),
-			Provider:      getEnv("CLOUD_INTEGRATION_PROVIDER", getEnv("CLOUD_PROVIDER", "aliyun")),
-			CloudProvider: getEnv("CLOUD_PROVIDER", "aliyun"),
-			Region:        getEnv("CLOUD_INTEGRATION_REGION", getEnv("CLOUD_REGION", "cn-hangzhou")),
+			Provider:      getEnv("CLOUD_INTEGRATION_PROVIDER", getEnv("CLOUD_PROVIDER", "aws")),
+			CloudProvider: getEnv("CLOUD_PROVIDER", "aws"),
+			Region:        getEnv("CLOUD_INTEGRATION_REGION", getEnv("CLOUD_REGION", "us-west-2")),
 			Credentials: CloudCredentials{
 				AccessKeyID:     getEnv("CLOUD_ACCESS_KEY_ID", ""),
 				AccessKeySecret: getEnv("CLOUD_ACCESS_KEY_SECRET", ""),
