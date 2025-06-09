@@ -266,7 +266,7 @@ func (is *InputSanitizer) SanitizeInput(input string) string {
 func (is *InputSanitizer) ValidateEmail(email string) error {
 	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	if !emailRegex.MatchString(email) {
-		return errors.ValidationError("Invalid email format", email)
+		return errors.NewWithDetails(errors.ErrCodeValidation, "Invalid email format", email)
 	}
 	return nil
 }
@@ -274,18 +274,18 @@ func (is *InputSanitizer) ValidateEmail(email string) error {
 // ValidateAPIKey validates API key format and strength
 func (is *InputSanitizer) ValidateAPIKey(apiKey string) error {
 	if len(apiKey) < 32 {
-		return errors.ValidationError("API key too short", "minimum 32 characters required")
+		return errors.NewWithDetails(errors.ErrCodeValidation, "API key too short", "minimum 32 characters required")
 	}
 
 	if len(apiKey) > 512 {
-		return errors.ValidationError("API key too long", "maximum 512 characters allowed")
+		return errors.NewWithDetails(errors.ErrCodeValidation, "API key too long", "maximum 512 characters allowed")
 	}
 
 	// Check for common patterns that might indicate weak keys
 	if strings.Contains(strings.ToLower(apiKey), "password") ||
 		strings.Contains(strings.ToLower(apiKey), "secret") ||
 		regexp.MustCompile(`^[a-zA-Z0-9]{32,}$`).MatchString(apiKey) == false {
-		return errors.ValidationError("API key format invalid", "key must contain alphanumeric characters")
+		return errors.NewWithDetails(errors.ErrCodeValidation, "API key format invalid", "key must contain alphanumeric characters")
 	}
 
 	return nil

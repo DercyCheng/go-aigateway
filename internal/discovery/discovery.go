@@ -1,9 +1,12 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"go-aigateway/internal/config"
+	"net/http"
 	"sync"
 	"time"
 
@@ -145,25 +148,173 @@ func NewConsulDiscovery(cfg *config.ServiceDiscoveryConfig) (*ConsulDiscovery, e
 
 func (c *ConsulDiscovery) Register(instance *ServiceInstance) error {
 	logrus.WithField("instance", instance.ID).Info("Registering service with Consul")
-	// TODO: Implement Consul registration
-	return nil
+
+	// Build Consul service registration payload
+	registration := map[string]interface{}{
+		"ID":      instance.ID,
+		"Name":    instance.Name,
+		"Address": instance.Address,
+		"Port":    instance.Port,
+		"Tags":    instance.Tags,
+		"Meta":    instance.Meta,
+		"Check": map[string]interface{}{
+			"HTTP":                           fmt.Sprintf("%s://%s:%d/health", instance.Protocol, instance.Address, instance.Port),
+			"Interval":                       "10s",
+			"Timeout":                        "3s",
+			"DeregisterCriticalServiceAfter": "30s",
+		},
+	}
+
+	// Make HTTP request to Consul API
+	jsonData, err := json.Marshal(registration)
+	if err != nil {
+		return fmt.Errorf("failed to marshal registration data: %w", err)
+	}
+
+	for _, endpoint := range c.config.Endpoints {
+		url := fmt.Sprintf("%s/v1/agent/service/register", endpoint)
+		req, err := http.NewRequest("PUT", url, bytes.NewReader(jsonData))
+		if err != nil {
+			logrus.WithError(err).Warnf("Failed to create request for Consul endpoint %s", endpoint)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			logrus.WithError(err).Warnf("Failed to register with Consul endpoint %s", endpoint)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			logrus.WithField("instance", instance.ID).Info("Successfully registered service with Consul")
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to register service with any Consul endpoint")
 }
 
 func (c *ConsulDiscovery) Deregister(instanceID string) error {
 	logrus.WithField("instance", instanceID).Info("Deregistering service from Consul")
-	// TODO: Implement Consul deregistration
-	return nil
+
+	for _, endpoint := range c.config.Endpoints {
+		url := fmt.Sprintf("%s/v1/agent/service/deregister/%s", endpoint, instanceID)
+		req, err := http.NewRequest("PUT", url, nil)
+		if err != nil {
+			continue
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			logrus.WithError(err).Warnf("Failed to deregister from Consul endpoint %s", endpoint)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			logrus.WithField("instance", instanceID).Info("Successfully deregistered service from Consul")
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to deregister service from any Consul endpoint")
 }
 
 func (c *ConsulDiscovery) Discover(serviceName string) ([]*ServiceInstance, error) {
 	logrus.WithField("service", serviceName).Info("Discovering services from Consul")
-	// TODO: Implement Consul service discovery
-	return nil, nil
+
+	for _, endpoint := range c.config.Endpoints {
+		url := fmt.Sprintf("%s/v1/health/service/%s?passing=true", endpoint, serviceName)
+		resp, err := http.Get(url)
+		if err != nil {
+			logrus.WithError(err).Warnf("Failed to discover services from Consul endpoint %s", endpoint)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			continue
+		}
+
+		var consulServices []struct {
+			Service struct {
+				ID      string            `json:"ID"`
+				Service string            `json:"Service"`
+				Address string            `json:"Address"`
+				Port    int               `json:"Port"`
+				Tags    []string          `json:"Tags"`
+				Meta    map[string]string `json:"Meta"`
+			} `json:"Service"`
+			Checks []struct {
+				Status string `json:"Status"`
+			} `json:"Checks"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&consulServices); err != nil {
+			continue
+		}
+
+		var instances []*ServiceInstance
+		for _, cs := range consulServices {
+			health := "unknown"
+			for _, check := range cs.Checks {
+				if check.Status == "passing" {
+					health = "healthy"
+					break
+				} else if check.Status == "critical" {
+					health = "unhealthy"
+				}
+			}
+
+			instances = append(instances, &ServiceInstance{
+				ID:       cs.Service.ID,
+				Name:     cs.Service.Service,
+				Address:  cs.Service.Address,
+				Port:     cs.Service.Port,
+				Protocol: "http", // Default to http
+				Tags:     cs.Service.Tags,
+				Meta:     cs.Service.Meta,
+				Health:   health,
+			})
+		}
+
+		return instances, nil
+	}
+
+	return nil, fmt.Errorf("failed to discover services from any Consul endpoint")
 }
 
 func (c *ConsulDiscovery) Watch(serviceName string, callback func([]*ServiceInstance)) error {
 	logrus.WithField("service", serviceName).Info("Watching service changes in Consul")
-	// TODO: Implement Consul watch
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second) // Poll every 30 seconds
+		defer ticker.Stop()
+
+		var lastInstances []*ServiceInstance
+
+		for {
+			select {
+			case <-ticker.C:
+				instances, err := c.Discover(serviceName)
+				if err != nil {
+					logrus.WithError(err).Error("Failed to discover services during watch")
+					continue
+				}
+
+				// Check if instances have changed
+				if !instancesEqual(lastInstances, instances) {
+					lastInstances = instances
+					callback(instances)
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -268,4 +419,23 @@ func (n *NacosDiscovery) Watch(serviceName string, callback func([]*ServiceInsta
 
 func (n *NacosDiscovery) Close() error {
 	return nil
+}
+
+// Helper function to compare service instances
+func instancesEqual(a, b []*ServiceInstance) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i].ID != b[i].ID ||
+			a[i].Name != b[i].Name ||
+			a[i].Address != b[i].Address ||
+			a[i].Port != b[i].Port ||
+			a[i].Health != b[i].Health {
+			return false
+		}
+	}
+
+	return true
 }

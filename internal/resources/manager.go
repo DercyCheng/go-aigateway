@@ -78,7 +78,7 @@ func (rm *ResourceManager) Unregister(resourceID string) error {
 
 	resource, exists := rm.resources[resourceID]
 	if !exists {
-		return errors.NotFoundError("Resource: " + resourceID)
+		return errors.New(errors.ErrCodeValidation, "Resource not found: "+resourceID)
 	}
 
 	if err := resource.Close(); err != nil {
@@ -99,7 +99,7 @@ func (rm *ResourceManager) Get(resourceID string) (ManagedResource, error) {
 
 	resource, exists := rm.resources[resourceID]
 	if !exists {
-		return nil, errors.NotFoundError("Resource: " + resourceID)
+		return nil, errors.New(errors.ErrCodeValidation, "Resource not found: "+resourceID)
 	}
 
 	return resource, nil
@@ -154,7 +154,7 @@ func (rm *ResourceManager) Shutdown(timeout time.Duration) error {
 	case err := <-done:
 		return err
 	case <-time.After(timeout):
-		return errors.TimeoutError("Resource manager shutdown")
+		return context.DeadlineExceeded
 	}
 }
 

@@ -6,11 +6,14 @@ import (
 	"go-aigateway/internal/cloud"
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/discovery"
+	"go-aigateway/internal/errors"
 	"go-aigateway/internal/handlers"
 	"go-aigateway/internal/localmodel"
 	"go-aigateway/internal/middleware"
 	"go-aigateway/internal/monitoring"
+	"go-aigateway/internal/performance"
 	"go-aigateway/internal/protocol"
+	"go-aigateway/internal/ram"
 	redisClient "go-aigateway/internal/redis"
 	"go-aigateway/internal/router"
 	"go-aigateway/internal/security"
@@ -36,9 +39,11 @@ func main() {
 
 	// Setup logging
 	setupLogging(cfg)
+
 	// Initialize services
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	// Initialize Redis client
 	var redisClientInstance *redisClient.Client
 	var err error
@@ -62,19 +67,55 @@ func main() {
 		logrus.Info("Redis is disabled")
 	}
 
-	// Initialize service discovery
+	// Initialize enhanced error handling system
+	errorHandler := errors.NewErrorHandler()
+	// Use error handler as middleware (will be added to Gin router later)
+
+	// Initialize performance optimization system
+	performanceOptimizer := performance.NewPerformanceOptimizer(cfg)
+	// Performance optimizer will be used in middleware (added to Gin router later)
+
+	// Initialize monitoring system with enhanced features
+	var monitoringSystem *monitoring.MonitoringSystem
+	if cfg.Monitoring.Enabled && redisClientInstance != nil {
+		monitoringSystem = monitoring.NewMonitoringSystem(&cfg.Monitoring, redisClientInstance.Client)
+		if monitoringSystem != nil {
+			logrus.Info("Enhanced monitoring system initialized")
+		}
+	}
+
+	// Initialize service discovery with real implementations
 	serviceDiscovery, err := discovery.NewManager(&cfg.ServiceDiscovery)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to initialize service discovery")
 	}
-	defer serviceDiscovery.Close() // Initialize protocol converter
+	if serviceDiscovery != nil {
+		defer serviceDiscovery.Close()
+		logrus.Info("Service discovery initialized")
+	}
+
+	// Initialize protocol converter
 	protocolConverter := protocol.NewProtocolConverter(&cfg.ProtocolConversion)
 
-	// Initialize local authentication system
-	localAuth := security.NewLocalAuthenticator(&cfg.Security) // Initialize cloud integrator
+	// Initialize authentication systems
+	localAuth := security.NewLocalAuthenticator(&cfg.Security)
+
+	// Initialize RAM authentication if enabled
+	var ramAuth *ram.RAMAuthenticator
+	if cfg.RAMAuth.Enabled {
+		ramAuth = ram.NewRAMAuthenticator(&cfg.RAMAuth)
+		logrus.Info("RAM authentication initialized")
+		// RAM auth will be used in middleware
+		_ = ramAuth // Use ramAuth to avoid unused variable warning
+	}
+
+	// Initialize cloud integrator with real implementations
 	cloudIntegrator, err := cloud.NewCloudIntegrator(&cfg.CloudIntegration)
 	if err != nil {
-		logrus.WithError(err).Fatal("Failed to initialize cloud integrator")
+		logrus.WithError(err).Warn("Failed to initialize cloud integrator")
+	} else if cloudIntegrator != nil {
+		defer cloudIntegrator.Close()
+		logrus.Info("Cloud integration initialized")
 	}
 
 	// Initialize local model server and manager if enabled
@@ -85,21 +126,18 @@ func main() {
 		// Create manager
 		localModelManager = localmodel.NewManager(server)
 
-		// Start local model server if configured to auto-start
-		if cfg.LocalModel.Enabled {
-			go func() {
-				if err := localModelManager.Start(context.Background()); err != nil {
-					logrus.WithError(err).Error("Failed to start local model server")
-				} else {
-					logrus.Info("Local model server started successfully")
-				}
-			}()
-		}
+		// Start local model server
+		go func() {
+			if err := localModelManager.Start(context.Background()); err != nil {
+				logrus.WithError(err).Error("Failed to start local model server")
+			} else {
+				logrus.Info("Local model server started successfully")
+			}
+		}()
 	}
 
-	// Initialize advanced monitoring components (only if Redis is enabled)
+	// Initialize advanced monitoring and scaling components
 	var metricsCollector *middleware.AdvancedMetricsCollector
-	var monitoringSystem *monitoring.MonitoringSystem
 	var autoScaler *autoscaler.AutoScaler
 	var redisRateLimiter *middleware.RedisRateLimiter
 	var monitoringHandler *handlers.MonitoringHandler
@@ -108,15 +146,6 @@ func main() {
 		// Initialize advanced metrics collector
 		metricsCollector = middleware.NewAdvancedMetricsCollector(redisClientInstance.Client)
 		go metricsCollector.StartMetricsCollector(ctx)
-
-		// Initialize monitoring system
-		if cfg.Monitoring.Enabled {
-			monitoringSystem = monitoring.NewMonitoringSystem(redisClientInstance.Client)
-			if cfg.Monitoring.AlertsEnabled {
-				go monitoringSystem.Start(ctx)
-				logrus.Info("Monitoring system started")
-			}
-		}
 
 		// Initialize auto scaler
 		if cfg.AutoScaling.Enabled {
@@ -152,6 +181,15 @@ func main() {
 	// Add basic middleware
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+
+	// Add enhanced error handling middleware
+	r.Use(errorHandler.RecoveryMiddleware())
+
+	// Add performance optimization middleware
+	r.Use(performanceOptimizer.PerformanceMetricsMiddleware())
+	r.Use(performanceOptimizer.IntelligentCachingMiddleware(5 * time.Minute))
+	r.Use(performanceOptimizer.AdaptiveCompressionMiddleware())
+	r.Use(performanceOptimizer.AdaptiveRateLimitingMiddleware())
 
 	// Add security middleware
 	r.Use(middleware.RequestTimeout(30 * time.Second))

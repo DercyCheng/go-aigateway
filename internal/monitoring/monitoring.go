@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go-aigateway/internal/config"
+	"net/http"
+	"runtime"
+	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
-// AlertLevel 告警级别
+// AlertLevel represents alert severity levels
 type AlertLevel string
 
 const (
@@ -19,7 +25,7 @@ const (
 	AlertLevelCritical AlertLevel = "critical"
 )
 
-// Alert 告警信息
+// Alert represents a monitoring alert
 type Alert struct {
 	ID         string                 `json:"id"`
 	Level      AlertLevel             `json:"level"`
@@ -31,7 +37,7 @@ type Alert struct {
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Rule 监控规则
+// Rule represents a monitoring rule
 type Rule struct {
 	ID          string        `json:"id"`
 	Name        string        `json:"name"`
@@ -44,35 +50,125 @@ type Rule struct {
 	Enabled     bool          `json:"enabled"`
 }
 
-// MonitoringSystem 监控系统
+// Metrics represents system metrics
+type Metrics struct {
+	RequestCount        int64     `json:"request_count"`
+	ErrorCount          int64     `json:"error_count"`
+	AverageResponseTime float64   `json:"average_response_time"`
+	QPS                 float64   `json:"qps"`
+	ErrorRate           float64   `json:"error_rate"`
+	CPUUsage            float64   `json:"cpu_usage"`
+	MemoryUsage         float64   `json:"memory_usage"`
+	GoroutineCount      int       `json:"goroutine_count"`
+	Timestamp           time.Time `json:"timestamp"`
+}
+
+// MonitoringSystem represents the monitoring system
 type MonitoringSystem struct {
+	config      *config.MonitoringConfig
 	redisClient *redis.Client
 	rules       map[string]*Rule
 	alerts      map[string]*Alert
+	metrics     *Metrics
+	mutex       sync.RWMutex
+
+	// Prometheus metrics
+	requestCounter    prometheus.Counter
+	errorCounter      prometheus.Counter
+	responseTimeHist  prometheus.Histogram
+	activeConnections prometheus.Gauge
+	systemCPU         prometheus.Gauge
+	systemMemory      prometheus.Gauge
+
+	// Channels for real-time monitoring
+	metricsChan chan *Metrics
+	alertsChan  chan *Alert
+	stopChan    chan struct{}
 }
 
-// NewMonitoringSystem 创建监控系统
-func NewMonitoringSystem(redisClient *redis.Client) *MonitoringSystem {
+// NewMonitoringSystem creates a new monitoring system
+func NewMonitoringSystem(cfg *config.MonitoringConfig, redisClient *redis.Client) *MonitoringSystem {
+	if !cfg.Enabled {
+		return nil
+	}
+
 	ms := &MonitoringSystem{
+		config:      cfg,
 		redisClient: redisClient,
 		rules:       make(map[string]*Rule),
 		alerts:      make(map[string]*Alert),
+		metrics:     &Metrics{},
+		metricsChan: make(chan *Metrics, 100),
+		alertsChan:  make(chan *Alert, 100),
+		stopChan:    make(chan struct{}),
 	}
 
-	// 添加默认监控规则
+	// Initialize Prometheus metrics
+	ms.initPrometheusMetrics()
+
+	// Add default monitoring rules
 	ms.addDefaultRules()
+
+	// Start background monitoring
+	go ms.backgroundMonitoring()
+	go ms.metricsCollector()
+	go ms.alertProcessor()
 
 	return ms
 }
 
-// addDefaultRules 添加默认监控规则
+// initPrometheusMetrics initializes Prometheus metrics
+func (ms *MonitoringSystem) initPrometheusMetrics() {
+	ms.requestCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "aigateway_requests_total",
+		Help: "Total number of requests processed",
+	})
+
+	ms.errorCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "aigateway_errors_total",
+		Help: "Total number of errors",
+	})
+
+	ms.responseTimeHist = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "aigateway_response_time_seconds",
+		Help:    "Response time in seconds",
+		Buckets: prometheus.DefBuckets,
+	})
+
+	ms.activeConnections = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "aigateway_active_connections",
+		Help: "Number of active connections",
+	})
+
+	ms.systemCPU = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "aigateway_cpu_usage_percent",
+		Help: "CPU usage percentage",
+	})
+
+	ms.systemMemory = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "aigateway_memory_usage_bytes",
+		Help: "Memory usage in bytes",
+	})
+
+	// Register all metrics
+	prometheus.MustRegister(
+		ms.requestCounter,
+		ms.errorCounter,
+		ms.responseTimeHist,
+		ms.activeConnections,
+		ms.systemCPU,
+		ms.systemMemory,
+	)
+}
+
+// addDefaultRules adds default monitoring rules
 func (ms *MonitoringSystem) addDefaultRules() {
 	rules := []*Rule{
 		{
 			ID:          "high_qps",
 			Name:        "High QPS Alert",
 			Description: "QPS exceeds threshold",
-			MetricKey:   "metrics:qps:current",
+			MetricKey:   "qps",
 			Operator:    ">",
 			Threshold:   1000,
 			Duration:    time.Minute * 2,
@@ -83,7 +179,7 @@ func (ms *MonitoringSystem) addDefaultRules() {
 			ID:          "high_error_rate",
 			Name:        "High Error Rate Alert",
 			Description: "Error rate exceeds 5%",
-			MetricKey:   "metrics:error_rate:current",
+			MetricKey:   "error_rate",
 			Operator:    ">",
 			Threshold:   5.0,
 			Duration:    time.Minute * 1,
@@ -94,7 +190,7 @@ func (ms *MonitoringSystem) addDefaultRules() {
 			ID:          "high_response_time",
 			Name:        "High Response Time Alert",
 			Description: "Average response time exceeds 2 seconds",
-			MetricKey:   "metrics:response_time:avg",
+			MetricKey:   "average_response_time",
 			Operator:    ">",
 			Threshold:   2.0,
 			Duration:    time.Minute * 3,
@@ -102,13 +198,24 @@ func (ms *MonitoringSystem) addDefaultRules() {
 			Enabled:     true,
 		},
 		{
-			ID:          "low_backend_success_rate",
-			Name:        "Low Backend Success Rate Alert",
-			Description: "Backend success rate below 95%",
-			MetricKey:   "metrics:backend:success_rate",
-			Operator:    "<",
-			Threshold:   95.0,
-			Duration:    time.Minute * 2,
+			ID:          "high_cpu_usage",
+			Name:        "High CPU Usage Alert",
+			Description: "CPU usage exceeds 80%",
+			MetricKey:   "cpu_usage",
+			Operator:    ">",
+			Threshold:   80.0,
+			Duration:    time.Minute * 5,
+			Level:       AlertLevelWarning,
+			Enabled:     true,
+		},
+		{
+			ID:          "high_memory_usage",
+			Name:        "High Memory Usage Alert",
+			Description: "Memory usage exceeds 85%",
+			MetricKey:   "memory_usage",
+			Operator:    ">",
+			Threshold:   85.0,
+			Duration:    time.Minute * 5,
 			Level:       AlertLevelCritical,
 			Enabled:     true,
 		},
@@ -119,75 +226,151 @@ func (ms *MonitoringSystem) addDefaultRules() {
 	}
 }
 
-// Start 启动监控系统
-func (ms *MonitoringSystem) Start(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second) // 每30秒检查一次
-	defer ticker.Stop()
+// RecordRequest records a new request metric
+func (ms *MonitoringSystem) RecordRequest() {
+	if ms == nil {
+		return
+	}
+	ms.requestCounter.Inc()
 
-	logrus.Info("Monitoring system started")
+	ms.mutex.Lock()
+	ms.metrics.RequestCount++
+	ms.mutex.Unlock()
+}
+
+// RecordError records an error metric
+func (ms *MonitoringSystem) RecordError() {
+	if ms == nil {
+		return
+	}
+	ms.errorCounter.Inc()
+
+	ms.mutex.Lock()
+	ms.metrics.ErrorCount++
+	ms.mutex.Unlock()
+}
+
+// RecordResponseTime records response time metric
+func (ms *MonitoringSystem) RecordResponseTime(duration time.Duration) {
+	if ms == nil {
+		return
+	}
+	ms.responseTimeHist.Observe(duration.Seconds())
+}
+
+// UpdateActiveConnections updates active connections metric
+func (ms *MonitoringSystem) UpdateActiveConnections(count int) {
+	if ms == nil {
+		return
+	}
+	ms.activeConnections.Set(float64(count))
+}
+
+// backgroundMonitoring runs background monitoring tasks
+func (ms *MonitoringSystem) backgroundMonitoring() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
-			logrus.Info("Monitoring system stopped")
+		case <-ms.stopChan:
 			return
 		case <-ticker.C:
-			ms.checkRules(ctx)
+			ms.collectSystemMetrics()
+			ms.checkRules()
 		}
 	}
 }
 
-// checkRules 检查所有监控规则
-func (ms *MonitoringSystem) checkRules(ctx context.Context) {
+// collectSystemMetrics collects system-level metrics
+func (ms *MonitoringSystem) collectSystemMetrics() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	ms.mutex.Lock()
+	ms.metrics.GoroutineCount = runtime.NumGoroutine()
+	ms.metrics.MemoryUsage = float64(m.Alloc) / 1024 / 1024 // MB
+	ms.metrics.Timestamp = time.Now()
+
+	// Calculate QPS and error rate from counters
+	if ms.metrics.RequestCount > 0 {
+		ms.metrics.ErrorRate = (float64(ms.metrics.ErrorCount) / float64(ms.metrics.RequestCount)) * 100
+	}
+	ms.mutex.Unlock()
+
+	// Update Prometheus metrics
+	ms.systemMemory.Set(float64(m.Alloc))
+
+	// Send metrics to channel for processing
+	select {
+	case ms.metricsChan <- ms.metrics:
+	default:
+		// Channel full, skip this update
+	}
+}
+
+// checkRules checks monitoring rules and generates alerts
+func (ms *MonitoringSystem) checkRules() {
+	ms.mutex.RLock()
+	currentMetrics := *ms.metrics
+	ms.mutex.RUnlock()
+
 	for _, rule := range ms.rules {
 		if !rule.Enabled {
 			continue
 		}
 
-		if err := ms.checkRule(ctx, rule); err != nil {
-			logrus.WithError(err).WithField("rule_id", rule.ID).Error("Failed to check monitoring rule")
+		var value float64
+		switch rule.MetricKey {
+		case "qps":
+			value = currentMetrics.QPS
+		case "error_rate":
+			value = currentMetrics.ErrorRate
+		case "average_response_time":
+			value = currentMetrics.AverageResponseTime
+		case "cpu_usage":
+			value = currentMetrics.CPUUsage
+		case "memory_usage":
+			value = currentMetrics.MemoryUsage
+		default:
+			continue
+		}
+
+		if ms.evaluateCondition(value, rule.Operator, rule.Threshold) {
+			alert := &Alert{
+				ID:        fmt.Sprintf("%s_%d", rule.ID, time.Now().Unix()),
+				Level:     rule.Level,
+				Title:     rule.Name,
+				Message:   fmt.Sprintf("%s: %s %s %.2f (threshold: %.2f)", rule.Name, rule.MetricKey, rule.Operator, value, rule.Threshold),
+				Timestamp: time.Now(),
+				Metadata: map[string]interface{}{
+					"rule_id":       rule.ID,
+					"metric_key":    rule.MetricKey,
+					"current_value": value,
+					"threshold":     rule.Threshold,
+					"operator":      rule.Operator,
+				},
+			}
+
+			ms.alerts[alert.ID] = alert
+
+			// Send alert to channel
+			select {
+			case ms.alertsChan <- alert:
+			default:
+				logrus.Warn("Alert channel full, dropping alert")
+			}
+
+			logrus.WithFields(logrus.Fields{
+				"alert_id": alert.ID,
+				"level":    alert.Level,
+				"message":  alert.Message,
+			}).Warn("Alert triggered")
 		}
 	}
 }
 
-// checkRule 检查单个监控规则
-func (ms *MonitoringSystem) checkRule(ctx context.Context, rule *Rule) error {
-	// 从Redis获取指标值
-	valueStr, err := ms.redisClient.Get(ctx, rule.MetricKey).Result()
-	if err == redis.Nil {
-		return nil // 指标不存在，跳过
-	} else if err != nil {
-		return err
-	}
-
-	// 解析指标值
-	var value float64
-	if err := json.Unmarshal([]byte(valueStr), &value); err != nil {
-		// 如果不是JSON，尝试直接解析为float64
-		if _, err := fmt.Sscanf(valueStr, "%f", &value); err != nil {
-			return fmt.Errorf("failed to parse metric value: %w", err)
-		}
-	}
-
-	// 检查是否触发告警
-	triggered := ms.evaluateCondition(value, rule.Operator, rule.Threshold)
-
-	if triggered {
-		// 创建或更新告警
-		if err := ms.createOrUpdateAlert(ctx, rule, value); err != nil {
-			return err
-		}
-	} else {
-		// 解决告警
-		if err := ms.resolveAlert(ctx, rule.ID); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// evaluateCondition 评估条件
+// evaluateCondition evaluates a monitoring condition
 func (ms *MonitoringSystem) evaluateCondition(value float64, operator string, threshold float64) bool {
 	switch operator {
 	case ">":
@@ -205,6 +388,169 @@ func (ms *MonitoringSystem) evaluateCondition(value float64, operator string, th
 	default:
 		return false
 	}
+}
+
+// metricsCollector processes metrics from the channel
+func (ms *MonitoringSystem) metricsCollector() {
+	for {
+		select {
+		case <-ms.stopChan:
+			return
+		case metrics := <-ms.metricsChan:
+			ms.storeMetrics(metrics)
+		}
+	}
+}
+
+// alertProcessor processes alerts from the channel
+func (ms *MonitoringSystem) alertProcessor() {
+	for {
+		select {
+		case <-ms.stopChan:
+			return
+		case alert := <-ms.alertsChan:
+			ms.processAlert(alert)
+		}
+	}
+}
+
+// storeMetrics stores metrics to Redis
+func (ms *MonitoringSystem) storeMetrics(metrics *Metrics) {
+	if ms.redisClient == nil {
+		return
+	}
+
+	ctx := context.Background()
+
+	// Store current metrics
+	metricsJSON, err := json.Marshal(metrics)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to marshal metrics")
+		return
+	}
+
+	key := fmt.Sprintf("metrics:current:%d", time.Now().Unix())
+	if err := ms.redisClient.Set(ctx, key, metricsJSON, ms.config.MetricsRetention).Err(); err != nil {
+		logrus.WithError(err).Error("Failed to store metrics in Redis")
+	}
+
+	// Store time-series data
+	pipe := ms.redisClient.Pipeline()
+	timestamp := time.Now().Unix()
+
+	pipe.ZAdd(ctx, "metrics:qps", redis.Z{Score: float64(timestamp), Member: metrics.QPS})
+	pipe.ZAdd(ctx, "metrics:error_rate", redis.Z{Score: float64(timestamp), Member: metrics.ErrorRate})
+	pipe.ZAdd(ctx, "metrics:response_time", redis.Z{Score: float64(timestamp), Member: metrics.AverageResponseTime})
+	pipe.ZAdd(ctx, "metrics:cpu_usage", redis.Z{Score: float64(timestamp), Member: metrics.CPUUsage})
+	pipe.ZAdd(ctx, "metrics:memory_usage", redis.Z{Score: float64(timestamp), Member: metrics.MemoryUsage})
+
+	// Execute pipeline
+	if _, err := pipe.Exec(ctx); err != nil {
+		logrus.WithError(err).Error("Failed to store time-series metrics")
+	}
+}
+
+// processAlert processes and potentially sends alerts
+func (ms *MonitoringSystem) processAlert(alert *Alert) {
+	if ms.redisClient == nil {
+		return
+	}
+
+	ctx := context.Background()
+
+	// Store alert in Redis
+	alertJSON, err := json.Marshal(alert)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to marshal alert")
+		return
+	}
+
+	key := fmt.Sprintf("alerts:%s", alert.ID)
+	if err := ms.redisClient.Set(ctx, key, alertJSON, 24*time.Hour).Err(); err != nil {
+		logrus.WithError(err).Error("Failed to store alert in Redis")
+	}
+
+	// Add to alerts list
+	if err := ms.redisClient.LPush(ctx, "alerts:list", alert.ID).Err(); err != nil {
+		logrus.WithError(err).Error("Failed to add alert to list")
+	}
+
+	// Keep only recent alerts (last 1000)
+	ms.redisClient.LTrim(ctx, "alerts:list", 0, 999)
+}
+
+// GetMetrics returns current system metrics
+func (ms *MonitoringSystem) GetMetrics() *Metrics {
+	if ms == nil {
+		return nil
+	}
+
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+
+	metrics := *ms.metrics
+	return &metrics
+}
+
+// GetAlerts returns recent alerts
+func (ms *MonitoringSystem) GetAlerts(limit int) ([]*Alert, error) {
+	if ms == nil {
+		return nil, fmt.Errorf("monitoring system not enabled")
+	}
+
+	if ms.redisClient == nil {
+		// Return in-memory alerts
+		var alerts []*Alert
+		count := 0
+		for _, alert := range ms.alerts {
+			if count >= limit {
+				break
+			}
+			alerts = append(alerts, alert)
+			count++
+		}
+		return alerts, nil
+	}
+
+	ctx := context.Background()
+
+	// Get alert IDs from Redis
+	alertIDs, err := ms.redisClient.LRange(ctx, "alerts:list", 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var alerts []*Alert
+	for _, alertID := range alertIDs {
+		alertJSON, err := ms.redisClient.Get(ctx, fmt.Sprintf("alerts:%s", alertID)).Result()
+		if err != nil {
+			continue
+		}
+
+		var alert Alert
+		if err := json.Unmarshal([]byte(alertJSON), &alert); err != nil {
+			continue
+		}
+
+		alerts = append(alerts, &alert)
+	}
+
+	return alerts, nil
+}
+
+// GetMetricsHandler returns an HTTP handler for Prometheus metrics
+func (ms *MonitoringSystem) GetMetricsHandler() http.Handler {
+	return promhttp.Handler()
+}
+
+// Close stops the monitoring system
+func (ms *MonitoringSystem) Close() error {
+	if ms == nil {
+		return nil
+	}
+
+	close(ms.stopChan)
+	return nil
 }
 
 // createOrUpdateAlert 创建或更新告警
