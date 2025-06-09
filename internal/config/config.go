@@ -140,13 +140,25 @@ type LocalModelConfig struct {
 	RetryDelay    time.Duration
 	LogRequests   bool
 	LogResponses  bool
+
+	// Third-party model support
+	ThirdParty ThirdPartyModelConfig
+}
+
+// ThirdPartyModelConfig represents configuration for third-party AI models
+type ThirdPartyModelConfig struct {
+	Enabled      bool   // Enable third-party models
+	Provider     string // Provider name: "dashscope", "openai", "anthropic"
+	APIKey       string // API key for the third-party service
+	BaseURL      string // Custom base URL for the API
+	DefaultModel string // Default model to use for requests
 }
 
 func New() *Config {
 	return &Config{
 		Port:      getEnv("PORT", "8080"),
 		GinMode:   getEnv("GIN_MODE", "release"),
-		TargetURL: getEnv("TARGET_URL", getEnv("TARGET_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")),
+		TargetURL: getEnv("TARGET_URL", getEnv("TARGET_API_URL", "")),
 		TargetKey: getEnv("TARGET_KEY", getEnv("TARGET_API_KEY", "")),
 		GatewayKeys: func() []string {
 			keys := getEnv("GATEWAY_API_KEYS", "")
@@ -228,8 +240,7 @@ func New() *Config {
 			Enabled:          getEnvBool("MONITORING_ENABLED", true),
 			AlertsEnabled:    getEnvBool("MONITORING_ALERTS_ENABLED", true),
 			MetricsRetention: getEnvDuration("MONITORING_METRICS_RETENTION", 24*time.Hour),
-		},
-		LocalModel: LocalModelConfig{
+		}, LocalModel: LocalModelConfig{
 			Enabled:       getEnvBool("LOCAL_MODEL_ENABLED", false),
 			PythonPath:    getEnv("PYTHON_PATH", "python"),
 			ModelPath:     getEnv("MODEL_PATH", "./python/model"),
@@ -247,6 +258,15 @@ func New() *Config {
 			RetryDelay:    getEnvDuration("LOCAL_MODEL_RETRY_DELAY", 1*time.Second),
 			LogRequests:   getEnvBool("LOCAL_MODEL_LOG_REQUESTS", true),
 			LogResponses:  getEnvBool("LOCAL_MODEL_LOG_RESPONSES", true),
+
+			// Third-party model configuration
+			ThirdParty: ThirdPartyModelConfig{
+				Enabled:      getEnvBool("THIRD_PARTY_MODEL_ENABLED", false),
+				Provider:     getEnv("THIRD_PARTY_MODEL_PROVIDER", "dashscope"),
+				APIKey:       getEnv("THIRD_PARTY_MODEL_API_KEY", getEnv("DASHSCOPE_API_KEY", "")),
+				BaseURL:      getEnv("THIRD_PARTY_MODEL_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+				DefaultModel: getEnv("THIRD_PARTY_MODEL_DEFAULT", "qwen-turbo"),
+			},
 		},
 	}
 }

@@ -9,6 +9,7 @@ import sys
 import torch
 from flask import Flask, request, jsonify
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import openai
 
 from error_handling import (
     handle_errors, validate_request_data, rate_limit, require_api_key,
@@ -31,6 +32,8 @@ tokenizer = None
 embedding_model = None
 model_type = "chat"
 model_size = "small"
+third_party_client = None
+use_third_party = False
 
 # Model selection based on size
 MODEL_MAP = {
@@ -51,8 +54,25 @@ MODEL_MAP = {
     }
 }
 
+# Third-party model configurations
+THIRD_PARTY_MODELS = {
+    "dashscope": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "models": {
+            "chat": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-1201", "qwen-max-longcontext"],
+            "completion": ["text-davinci-003", "text-curie-001"],
+            "embedding": ["text-embedding-v1", "text-embedding-v2"]
+        }
+    }
+}
+
 def initialize_model():
-    global model, tokenizer, embedding_model, model_type, model_size
+    global model, tokenizer, embedding_model, model_type, model_size, third_party_client, use_third_party
+    
+    # Check if we should use third-party models
+    if os.getenv('USE_THIRD_PARTY_MODEL', '').lower() == 'true':
+        initialize_third_party_model()
+        return
     
     model_id = MODEL_MAP[model_size][model_type]
     logger.info(f"Initializing {model_type} model: {model_id}")
@@ -74,6 +94,71 @@ def initialize_model():
         logger.info(f"Initializing embedding model: {embedding_model_id}")
         embedding_model = pipeline("feature-extraction", model=embedding_model_id, device=device)
 
+def initialize_third_party_model():
+    global third_party_client, use_third_party
+    
+    # Get configuration from environment variables
+    api_key = os.getenv('DASHSCOPE_API_KEY')
+    if not api_key:
+        raise ValueError("DASHSCOPE_API_KEY environment variable is required for third-party models")
+    
+    base_url = THIRD_PARTY_MODELS["dashscope"]["base_url"]
+    
+    # Initialize OpenAI client with DashScope configuration
+    third_party_client = openai.OpenAI(
+        api_key=api_key,
+        base_url=base_url
+    )
+    
+    use_third_party = True
+    logger.info(f"Initialized DashScope third-party model client with base URL: {base_url}")
+
+def get_available_models():
+    """Get list of available models based on current configuration"""
+    if use_third_party:
+        models = []
+        for model_type, model_list in THIRD_PARTY_MODELS["dashscope"]["models"].items():
+            for model_name in model_list:
+                models.append({
+                    "id": model_name,
+                    "object": "model",
+                    "created": int(time.time()) - 10000,
+                    "owned_by": "dashscope"
+                })
+        return models
+    else:
+        models = [
+            {
+                "id": MODEL_MAP["small"]["chat"],
+                "object": "model",
+                "created": int(time.time()) - 10000,
+                "owned_by": "local"
+            },
+            {
+                "id": MODEL_MAP["small"]["completion"],
+                "object": "model",
+                "created": int(time.time()) - 10000,
+                "owned_by": "local"
+            },
+            {
+                "id": MODEL_MAP["small"]["embedding"],
+                "object": "model",
+                "created": int(time.time()) - 10000,
+                "owned_by": "local"
+            }
+        ]
+        
+        if model_size != "small":
+            for model_type in ["chat", "completion", "embedding"]:
+                models.append({
+                    "id": MODEL_MAP[model_size][model_type],
+                    "object": "model",
+                    "created": int(time.time()) - 10000,
+                    "owned_by": "local"
+                })
+        
+        return models
+
 @app.route('/health', methods=['GET'])
 @handle_errors
 @log_request
@@ -84,15 +169,20 @@ def health_check():
         status.update({
             "status": "healthy",
             "timestamp": int(time.time()),
-            "model_loaded": model is not None,
+            "model_loaded": model is not None or use_third_party,
             "model_type": model_type,
-            "model_size": model_size
+            "model_size": model_size,
+            "third_party_enabled": use_third_party
         })
         
         # Check model health
-        if model is None:
+        if not use_third_party and model is None:
             status["status"] = "degraded"
             status["issues"] = ["Model not loaded"]
+        
+        if use_third_party and third_party_client is None:
+            status["status"] = "degraded"
+            status["issues"] = ["Third-party client not initialized"]
         
         # Check resource constraints
         if status.get("active_requests", 0) >= resource_manager.max_concurrent_requests:
@@ -116,15 +206,18 @@ def health_check():
 @with_resource_management
 def chat_completions():
     """Enhanced chat completions with comprehensive validation and error handling"""
-    if model is None or tokenizer is None:
+    if not use_third_party and (model is None or tokenizer is None):
         raise ResourceError("Model not loaded", "model")
+    
+    if use_third_party and third_party_client is None:
+        raise ResourceError("Third-party client not initialized", "client")
     
     try:
         data = request.get_json()
         messages = data.get('messages', [])
         max_tokens = data.get('max_tokens', 1024)
         temperature = data.get('temperature', 0.7)
-        model_name = data.get('model', MODEL_MAP[model_size][model_type])
+        model_name = data.get('model', 'qwen-turbo' if use_third_party else MODEL_MAP[model_size][model_type])
         
         # Validate parameters
         if not isinstance(messages, list) or len(messages) == 0:
@@ -153,8 +246,51 @@ def chat_completions():
             if len(msg['content']) > 8000:
                 raise ValidationError(f"Content in message {i} too long", f"messages[{i}].content")
         
-        logger.info(f"Processing chat completion: {len(messages)} messages, max_tokens={max_tokens}")
+        logger.info(f"Processing chat completion: {len(messages)} messages, max_tokens={max_tokens}, third_party={use_third_party}")
         
+        # Handle third-party models
+        if use_third_party:
+            start_time = time.time()
+            try:
+                response = third_party_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                
+                generation_time = time.time() - start_time
+                logger.info(f"Third-party chat completion successful in {generation_time:.2f}s")
+                
+                # Convert to our standard format
+                return jsonify({
+                    "id": response.id,
+                    "object": "chat.completion",
+                    "created": response.created,
+                    "model": response.model,
+                    "system_fingerprint": "dashscope-third-party",
+                    "choices": [
+                        {
+                            "index": choice.index,
+                            "message": {
+                                "role": choice.message.role,
+                                "content": choice.message.content
+                            },
+                            "finish_reason": choice.finish_reason
+                        } for choice in response.choices
+                    ],
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
+                })
+                
+            except Exception as e:
+                logger.error(f"Third-party API error: {str(e)}")
+                raise ResourceError(f"Third-party model error: {str(e)}", "third_party_api")
+        
+        # Handle local models (existing code)
         # Format the conversation for the model
         prompt = ""
         for msg in messages:
@@ -233,16 +369,66 @@ def chat_completions():
         raise
 
 @app.route('/v1/completions', methods=['POST'])
+@handle_errors
+@log_request
+@rate_limit(max_requests=30, window=60)
+@validate_request_data(required_fields=['prompt'])
+@with_resource_management
 def completions():
+    """Text completion endpoint with third-party support"""
+    if not use_third_party and (model is None or tokenizer is None):
+        raise ResourceError("Model not loaded", "model")
+    
+    if use_third_party and third_party_client is None:
+        raise ResourceError("Third-party client not initialized", "client")
+    
     try:
         data = request.json
         prompt = data.get('prompt', '')
         max_tokens = data.get('max_tokens', 1024)
         temperature = data.get('temperature', 0.7)
-        model_name = data.get('model', MODEL_MAP[model_size][model_type])
+        model_name = data.get('model', 'text-davinci-003' if use_third_party else MODEL_MAP[model_size][model_type])
         
-        logger.info(f"Completion request with prompt length: {len(prompt)}")
+        logger.info(f"Completion request with prompt length: {len(prompt)}, third_party={use_third_party}")
         
+        # Handle third-party models
+        if use_third_party:
+            start_time = time.time()
+            try:
+                response = third_party_client.completions.create(
+                    model=model_name,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                
+                generation_time = time.time() - start_time
+                logger.info(f"Third-party completion successful in {generation_time:.2f}s")
+                
+                return jsonify({
+                    "id": response.id,
+                    "object": "text_completion",
+                    "created": response.created,
+                    "model": response.model,
+                    "choices": [
+                        {
+                            "text": choice.text,
+                            "index": choice.index,
+                            "finish_reason": choice.finish_reason
+                        } for choice in response.choices
+                    ],
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
+                })
+                
+            except Exception as e:
+                logger.error(f"Third-party completion API error: {str(e)}")
+                raise ResourceError(f"Third-party model error: {str(e)}", "third_party_api")
+        
+        # Handle local models (existing code)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         
         # Generate response
@@ -279,23 +465,65 @@ def completions():
     
     except Exception as e:
         logger.error(f"Error in completions: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        raise
 
 @app.route('/v1/embeddings', methods=['POST'])
+@handle_errors
+@log_request
+@rate_limit(max_requests=30, window=60)
+@validate_request_data(required_fields=['input'])
+@with_resource_management
 def embeddings():
+    """Embeddings endpoint with third-party support"""
+    if not use_third_party and embedding_model is None:
+        raise ResourceError("Embedding model not initialized", "embedding_model")
+    
+    if use_third_party and third_party_client is None:
+        raise ResourceError("Third-party client not initialized", "client")
+        
     try:
-        if embedding_model is None:
-            return jsonify({"error": "Embedding model not initialized"}), 500
-            
         data = request.json
         input_texts = data.get('input', [])
-        model_name = data.get('model', MODEL_MAP[model_size]["embedding"])
+        model_name = data.get('model', 'text-embedding-v1' if use_third_party else MODEL_MAP[model_size]["embedding"])
         
         if isinstance(input_texts, str):
             input_texts = [input_texts]
             
-        logger.info(f"Embedding request with {len(input_texts)} inputs")
+        logger.info(f"Embedding request with {len(input_texts)} inputs, third_party={use_third_party}")
         
+        # Handle third-party models
+        if use_third_party:
+            start_time = time.time()
+            try:
+                response = third_party_client.embeddings.create(
+                    model=model_name,
+                    input=input_texts
+                )
+                
+                generation_time = time.time() - start_time
+                logger.info(f"Third-party embeddings successful in {generation_time:.2f}s")
+                
+                return jsonify({
+                    "object": "list",
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "embedding": embedding.embedding,
+                            "index": embedding.index
+                        } for embedding in response.data
+                    ],
+                    "model": response.model,
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
+                })
+                
+            except Exception as e:
+                logger.error(f"Third-party embeddings API error: {str(e)}")
+                raise ResourceError(f"Third-party model error: {str(e)}", "third_party_api")
+        
+        # Handle local models (existing code)
         # Generate embeddings
         embeddings = []
         token_count = 0
@@ -330,60 +558,48 @@ def embeddings():
     
     except Exception as e:
         logger.error(f"Error in embeddings: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        raise
 
 @app.route('/v1/models', methods=['GET'])
+@handle_errors
+@log_request
 def list_models():
-    models = [
-        {
-            "id": MODEL_MAP["small"]["chat"],
-            "object": "model",
-            "created": int(time.time()) - 10000,
-            "owned_by": "local"
-        },
-        {
-            "id": MODEL_MAP["small"]["completion"],
-            "object": "model",
-            "created": int(time.time()) - 10000,
-            "owned_by": "local"
-        },
-        {
-            "id": MODEL_MAP["small"]["embedding"],
-            "object": "model",
-            "created": int(time.time()) - 10000,
-            "owned_by": "local"
+    """List available models endpoint"""
+    try:
+        models = get_available_models()
+        response = {
+            "object": "list",
+            "data": models
         }
-    ]
-    
-    if model_size != "small":
-        for model_type in ["chat", "completion", "embedding"]:
-            models.append({
-                "id": MODEL_MAP[model_size][model_type],
-                "object": "model",
-                "created": int(time.time()) - 10000,
-                "owned_by": "local"
-            })
-    
-    response = {
-        "object": "list",
-        "data": models
-    }
-    
-    return jsonify(response)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error listing models: {str(e)}")
+        raise
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Local AI Model Server')
+    parser = argparse.ArgumentParser(description='Local AI Model Server with Third-Party Support')
     parser.add_argument('--host', type=str, default='localhost', help='Host to bind the server to')
     parser.add_argument('--port', type=int, default=5000, help='Port to bind the server to')
     parser.add_argument('--model-type', type=str, default='chat', choices=['chat', 'completion', 'embedding'], help='Type of model to use')
     parser.add_argument('--model-size', type=str, default='small', choices=['small', 'medium', 'large'], help='Size of model to use')
+    parser.add_argument('--use-third-party', action='store_true', help='Use third-party models (DashScope)')
     
     args = parser.parse_args()
     
     model_type = args.model_type
     model_size = args.model_size
     
-    logger.info(f"Starting server with model type: {model_type}, size: {model_size}")
-    initialize_model()
+    # Set environment variable for third-party usage
+    if args.use_third_party:
+        os.environ['USE_THIRD_PARTY_MODEL'] = 'true'
+    
+    logger.info(f"Starting server with model type: {model_type}, size: {model_size}, third_party: {args.use_third_party}")
+    
+    try:
+        initialize_model()
+        logger.info("Model initialization completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize model: {str(e)}")
+        sys.exit(1)
     
     app.run(host=args.host, port=args.port)

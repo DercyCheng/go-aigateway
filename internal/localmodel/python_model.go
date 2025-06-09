@@ -164,21 +164,36 @@ func (pms *PythonModelServer) Start(ctx context.Context) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install Python dependencies: %w", err)
 	}
-
 	// Start the Python server
 	logrus.WithFields(logrus.Fields{
-		"host": pms.config.ServerHost,
-		"port": pms.config.ServerPort,
+		"host":                pms.config.ServerHost,
+		"port":                pms.config.ServerPort,
+		"third_party_enabled": pms.config.ThirdParty.Enabled,
 	}).Info("Starting Python model server...")
 
-	cmd = exec.Command(
-		pms.config.PythonPath,
+	// Build command arguments
+	cmdArgs := []string{
 		scriptPath,
 		"--host", pms.config.ServerHost,
 		"--port", fmt.Sprintf("%d", pms.config.ServerPort),
 		"--model-type", pms.config.ModelType,
 		"--model-size", pms.config.ModelSize,
-	)
+	}
+
+	// Add third-party flag if enabled
+	if pms.config.ThirdParty.Enabled {
+		cmdArgs = append(cmdArgs, "--use-third-party")
+	}
+
+	cmd = exec.Command(pms.config.PythonPath, cmdArgs...)
+
+	// Set environment variables for third-party configuration
+	cmd.Env = os.Environ()
+	if pms.config.ThirdParty.Enabled && pms.config.ThirdParty.APIKey != "" {
+		cmd.Env = append(cmd.Env, "DASHSCOPE_API_KEY="+pms.config.ThirdParty.APIKey)
+		cmd.Env = append(cmd.Env, "USE_THIRD_PARTY_MODEL=true")
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go-aigateway/internal/config"
 	"io"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 type ModelManager struct {
 	modelPath     string
 	pythonPath    string
+	config        *config.LocalModelConfig
 	mu            sync.Mutex
 	downloadQueue map[string]bool
 }
@@ -36,10 +38,11 @@ type ModelInfo struct {
 }
 
 // NewModelManager creates a new model manager
-func NewModelManager(modelPath, pythonPath string) *ModelManager {
+func NewModelManager(modelPath, pythonPath string, cfg *config.LocalModelConfig) *ModelManager {
 	return &ModelManager{
 		modelPath:     modelPath,
 		pythonPath:    pythonPath,
+		config:        cfg,
 		downloadQueue: make(map[string]bool),
 	}
 }
@@ -49,7 +52,7 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	// Define the available models
+	// Define the available local models
 	models := []ModelInfo{
 		{
 			ID:          "tiny-llama",
@@ -87,6 +90,58 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 			Description: "高性能开源大模型，7B参数",
 			Downloaded:  mm.isModelDownloaded("HuggingFaceH4/mistral-7b-instruct-v0.2"),
 		},
+	}
+
+	// Add third-party models if enabled
+	if mm.config != nil && mm.config.ThirdParty.Enabled {
+		thirdPartyModels := []ModelInfo{
+			{
+				ID:          "qwen-turbo",
+				Name:        "通义千问 Turbo",
+				Type:        "chat",
+				Size:        "medium",
+				Status:      "available",
+				Description: "阿里云通义千问模型，快速响应，适合日常对话",
+				Downloaded:  true, // Third-party models are always "available"
+			},
+			{
+				ID:          "qwen-plus",
+				Name:        "通义千问 Plus",
+				Type:        "chat",
+				Size:        "large",
+				Status:      "available",
+				Description: "阿里云通义千问增强版，更强的推理能力",
+				Downloaded:  true,
+			},
+			{
+				ID:          "qwen-max",
+				Name:        "通义千问 Max",
+				Type:        "chat",
+				Size:        "large",
+				Status:      "available",
+				Description: "阿里云通义千问旗舰版，最强性能",
+				Downloaded:  true,
+			},
+			{
+				ID:          "text-embedding-v1",
+				Name:        "DashScope Embedding V1",
+				Type:        "embedding",
+				Size:        "medium",
+				Status:      "available",
+				Description: "阿里云文本嵌入模型V1版本",
+				Downloaded:  true,
+			},
+			{
+				ID:          "text-embedding-v2",
+				Name:        "DashScope Embedding V2",
+				Type:        "embedding",
+				Size:        "large",
+				Status:      "available",
+				Description: "阿里云文本嵌入模型V2版本，更高精度",
+				Downloaded:  true,
+			},
+		}
+		models = append(models, thirdPartyModels...)
 	}
 
 	return models, nil

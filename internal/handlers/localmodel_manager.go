@@ -65,6 +65,15 @@ func (h *LocalModelManagerHandler) DownloadModel() gin.HandlerFunc {
 			return
 		}
 
+		// Check if this is a third-party model
+		if h.isThirdPartyModel(modelID) {
+			// Third-party models don't need to be downloaded
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Third-party model is already available",
+			})
+			return
+		}
+
 		// Start the download in a goroutine so we don't block the request
 		go func() {
 			if err := h.modelManager.DownloadModel(c.Request.Context(), modelID); err != nil {
@@ -89,7 +98,17 @@ func (h *LocalModelManagerHandler) StartModel() gin.HandlerFunc {
 			return
 		}
 
-		// Get the model type and size
+		// Check if this is a third-party model
+		if h.isThirdPartyModel(modelID) {
+			// For third-party models, we don't need to "start" them as they're cloud-based
+			// Just return success to indicate the model is available
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Third-party model is available",
+			})
+			return
+		}
+
+		// Get the model type and size for local models
 		var modelType, modelSize string
 		switch modelID {
 		case "tiny-llama":
@@ -131,6 +150,16 @@ func (h *LocalModelManagerHandler) StopModel() gin.HandlerFunc {
 		if modelID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "Model ID is required",
+			})
+			return
+		}
+
+		// Check if this is a third-party model
+		if h.isThirdPartyModel(modelID) {
+			// For third-party models, we don't need to "stop" them as they're cloud-based
+			// Just return success
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Third-party model is always available",
 			})
 			return
 		}
@@ -199,6 +228,21 @@ func (h *LocalModelManagerHandler) GetModelStatus() gin.HandlerFunc {
 			return
 		}
 
+		// Check if this is a third-party model
+		if h.isThirdPartyModel(modelID) {
+			// Third-party models are always "available" when third-party is enabled
+			if h.config.ThirdParty.Enabled {
+				c.JSON(http.StatusOK, gin.H{
+					"status": "available",
+				})
+			} else {
+				c.JSON(http.StatusOK, gin.H{
+					"status": "unavailable",
+				})
+			}
+			return
+		}
+
 		status, err := h.modelManager.GetModelStatus(modelID)
 		if err != nil {
 			logrus.WithError(err).WithField("modelID", modelID).Error("Failed to get model status")
@@ -212,6 +256,25 @@ func (h *LocalModelManagerHandler) GetModelStatus() gin.HandlerFunc {
 			"status": status,
 		})
 	}
+}
+
+// isThirdPartyModel checks if the given model ID is a third-party model
+func (h *LocalModelManagerHandler) isThirdPartyModel(modelID string) bool {
+	// List of third-party model IDs from DashScope
+	thirdPartyModels := []string{
+		"qwen-turbo",
+		"qwen-plus",
+		"qwen-max",
+		"text-embedding-v1",
+		"text-embedding-v2",
+	}
+
+	for _, model := range thirdPartyModels {
+		if model == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterLocalModelManagerRoutes registers the local model manager routes

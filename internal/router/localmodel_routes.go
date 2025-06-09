@@ -15,9 +15,8 @@ func SetupLocalModelRoutes(r *gin.Engine, manager *localmodel.Manager, cfg *conf
 		logrus.Info("Local model is disabled")
 		return
 	}
-
 	// Create model manager
-	modelManager := localmodel.NewModelManager(cfg.LocalModel.ModelPath, cfg.LocalModel.PythonPath)
+	modelManager := localmodel.NewModelManager(cfg.LocalModel.ModelPath, cfg.LocalModel.PythonPath, &cfg.LocalModel)
 
 	// Create handlers
 	handler := handlers.NewLocalModelHandler(manager, &cfg.LocalModel)
