@@ -69,6 +69,11 @@ THIRD_PARTY_MODELS = {
 def initialize_model():
     global model, tokenizer, embedding_model, model_type, model_size, third_party_client, use_third_party
     
+    # Setup Hugging Face mirror for China mainland
+    if os.getenv('HF_ENDPOINT'):
+        os.environ['HF_ENDPOINT'] = os.getenv('HF_ENDPOINT')
+        logger.info(f"Using Hugging Face mirror: {os.getenv('HF_ENDPOINT')}")
+    
     # Check if we should use third-party models
     if os.getenv('USE_THIRD_PARTY_MODEL', '').lower() == 'true':
         initialize_third_party_model()
@@ -80,19 +85,40 @@ def initialize_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
     
-    if model_type in ["chat", "completion"]:
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            low_cpu_mem_usage=True,
-            device_map=device
-        )
-    
-    if model_type == "embedding" or model_size == "large":
-        embedding_model_id = MODEL_MAP[model_size]["embedding"]
-        logger.info(f"Initializing embedding model: {embedding_model_id}")
-        embedding_model = pipeline("feature-extraction", model=embedding_model_id, device=device)
+    try:
+        if model_type in ["chat", "completion"]:
+            logger.info(f"Downloading tokenizer for: {model_id}")
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                cache_dir=os.getenv('TRANSFORMERS_CACHE', None),
+                trust_remote_code=True
+            )
+            logger.info(f"Downloading model for: {model_id}")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                low_cpu_mem_usage=True,
+                device_map=device,
+                cache_dir=os.getenv('TRANSFORMERS_CACHE', None),
+                trust_remote_code=True
+            )
+        
+        if model_type == "embedding" or model_size == "large":
+            embedding_model_id = MODEL_MAP[model_size]["embedding"]
+            logger.info(f"Initializing embedding model: {embedding_model_id}")
+            embedding_model = pipeline(
+                "feature-extraction", 
+                model=embedding_model_id, 
+                device=device,
+                model_kwargs={
+                    "cache_dir": os.getenv('TRANSFORMERS_CACHE', None),
+                    "trust_remote_code": True
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error downloading/loading model: {str(e)}")
+        logger.info("This might be due to network issues. Please check your internet connection and Hugging Face mirror configuration.")
+        raise
 
 def initialize_third_party_model():
     global third_party_client, use_third_party

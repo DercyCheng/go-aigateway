@@ -52,8 +52,8 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	// Define the available local models
-	models := []ModelInfo{
+	// Define all available local models
+	allModels := []ModelInfo{
 		{
 			ID:          "tiny-llama",
 			Name:        "TinyLlama Chat",
@@ -90,6 +90,24 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 			Description: "高性能开源大模型，7B参数",
 			Downloaded:  mm.isModelDownloaded("HuggingFaceH4/mistral-7b-instruct-v0.2"),
 		},
+	}
+
+	// Filter models based on enabled models configuration
+	var models []ModelInfo
+	if mm.config != nil && len(mm.config.EnabledModels) > 0 {
+		enabledMap := make(map[string]bool)
+		for _, modelID := range mm.config.EnabledModels {
+			enabledMap[modelID] = true
+		}
+
+		for _, model := range allModels {
+			if enabledMap[model.ID] {
+				models = append(models, model)
+			}
+		}
+	} else {
+		// If no specific models are configured, return all models
+		models = allModels
 	}
 
 	// Add third-party models if enabled

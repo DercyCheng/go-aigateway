@@ -140,6 +140,7 @@ type LocalModelConfig struct {
 	RetryDelay    time.Duration
 	LogRequests   bool
 	LogResponses  bool
+	EnabledModels []string // List of enabled local models
 
 	// Third-party model support
 	ThirdParty ThirdPartyModelConfig
@@ -239,8 +240,7 @@ func New() *Config {
 		Monitoring: MonitoringConfig{
 			Enabled:          getEnvBool("MONITORING_ENABLED", true),
 			AlertsEnabled:    getEnvBool("MONITORING_ALERTS_ENABLED", true),
-			MetricsRetention: getEnvDuration("MONITORING_METRICS_RETENTION", 24*time.Hour),
-		}, LocalModel: LocalModelConfig{
+			MetricsRetention: getEnvDuration("MONITORING_METRICS_RETENTION", 24*time.Hour)}, LocalModel: LocalModelConfig{
 			Enabled:       getEnvBool("LOCAL_MODEL_ENABLED", false),
 			PythonPath:    getEnv("PYTHON_PATH", "python"),
 			ModelPath:     getEnv("MODEL_PATH", "./python/model"),
@@ -258,6 +258,7 @@ func New() *Config {
 			RetryDelay:    getEnvDuration("LOCAL_MODEL_RETRY_DELAY", 1*time.Second),
 			LogRequests:   getEnvBool("LOCAL_MODEL_LOG_REQUESTS", true),
 			LogResponses:  getEnvBool("LOCAL_MODEL_LOG_RESPONSES", true),
+			EnabledModels: getEnvStringSlice("ENABLED_LOCAL_MODELS", []string{"tiny-llama", "phi-2", "miniLM"}),
 			// Third-party model configuration
 			ThirdParty: ThirdPartyModelConfig{
 				Enabled:      getEnvBool("THIRD_PARTY_MODEL_ENABLED", false),
@@ -309,6 +310,19 @@ func getEnvFloat(key string, defaultValue float64) float64 {
 		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
 			return floatValue
 		}
+	}
+	return defaultValue
+}
+
+func getEnvStringSlice(key string, defaultValue []string) []string {
+	if value := os.Getenv(key); value != "" {
+		// Split by comma and trim spaces
+		parts := strings.Split(value, ",")
+		result := make([]string, len(parts))
+		for i, part := range parts {
+			result[i] = strings.TrimSpace(part)
+		}
+		return result
 	}
 	return defaultValue
 }
