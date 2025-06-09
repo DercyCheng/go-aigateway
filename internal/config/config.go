@@ -148,7 +148,7 @@ type LocalModelConfig struct {
 // ThirdPartyModelConfig represents configuration for third-party AI models
 type ThirdPartyModelConfig struct {
 	Enabled      bool   // Enable third-party models
-	Provider     string // Provider name: "dashscope", "openai", "anthropic"
+	Provider     string // Provider name: "alililian", "openai", "anthropic"
 	APIKey       string // API key for the third-party service
 	BaseURL      string // Custom base URL for the API
 	DefaultModel string // Default model to use for requests
@@ -258,11 +258,10 @@ func New() *Config {
 			RetryDelay:    getEnvDuration("LOCAL_MODEL_RETRY_DELAY", 1*time.Second),
 			LogRequests:   getEnvBool("LOCAL_MODEL_LOG_REQUESTS", true),
 			LogResponses:  getEnvBool("LOCAL_MODEL_LOG_RESPONSES", true),
-
 			// Third-party model configuration
 			ThirdParty: ThirdPartyModelConfig{
 				Enabled:      getEnvBool("THIRD_PARTY_MODEL_ENABLED", false),
-				Provider:     getEnv("THIRD_PARTY_MODEL_PROVIDER", "dashscope"),
+				Provider:     getEnv("THIRD_PARTY_MODEL_PROVIDER", "alililian"),
 				APIKey:       getEnv("THIRD_PARTY_MODEL_API_KEY", getEnv("DASHSCOPE_API_KEY", "")),
 				BaseURL:      getEnv("THIRD_PARTY_MODEL_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
 				DefaultModel: getEnv("THIRD_PARTY_MODEL_DEFAULT", "qwen-turbo"),

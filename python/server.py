@@ -104,14 +104,14 @@ def initialize_third_party_model():
     
     base_url = THIRD_PARTY_MODELS["dashscope"]["base_url"]
     
-    # Initialize OpenAI client with DashScope configuration
+    # Initialize OpenAI client with 阿里百炼 configuration
     third_party_client = openai.OpenAI(
         api_key=api_key,
         base_url=base_url
     )
     
     use_third_party = True
-    logger.info(f"Initialized DashScope third-party model client with base URL: {base_url}")
+    logger.info(f"Initialized 阿里百炼 third-party model client with base URL: {base_url}")
 
 def get_available_models():
     """Get list of available models based on current configuration"""
@@ -123,7 +123,7 @@ def get_available_models():
                     "id": model_name,
                     "object": "model",
                     "created": int(time.time()) - 10000,
-                    "owned_by": "dashscope"
+                    "owned_by": "alililian"
                 })
         return models
     else:
@@ -268,7 +268,7 @@ def chat_completions():
                     "object": "chat.completion",
                     "created": response.created,
                     "model": response.model,
-                    "system_fingerprint": "dashscope-third-party",
+                    "system_fingerprint": "alililian-third-party",
                     "choices": [
                         {
                             "index": choice.index,
@@ -582,7 +582,7 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Port to bind the server to')
     parser.add_argument('--model-type', type=str, default='chat', choices=['chat', 'completion', 'embedding'], help='Type of model to use')
     parser.add_argument('--model-size', type=str, default='small', choices=['small', 'medium', 'large'], help='Size of model to use')
-    parser.add_argument('--use-third-party', action='store_true', help='Use third-party models (DashScope)')
+    parser.add_argument('--use-third-party', action='store_true', help='Use third-party models (阿里百炼)')
     
     args = parser.parse_args()
     

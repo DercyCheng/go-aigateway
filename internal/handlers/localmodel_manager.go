@@ -260,7 +260,7 @@ func (h *LocalModelManagerHandler) GetModelStatus() gin.HandlerFunc {
 
 // isThirdPartyModel checks if the given model ID is a third-party model
 func (h *LocalModelManagerHandler) isThirdPartyModel(modelID string) bool {
-	// List of third-party model IDs from DashScope
+	// List of third-party model IDs from 阿里百炼
 	thirdPartyModels := []string{
 		"qwen-turbo",
 		"qwen-plus",

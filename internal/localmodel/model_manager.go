@@ -121,10 +121,9 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 				Status:      "available",
 				Description: "阿里云通义千问旗舰版，最强性能",
 				Downloaded:  true,
-			},
-			{
+			}, {
 				ID:          "text-embedding-v1",
-				Name:        "DashScope Embedding V1",
+				Name:        "阿里百炼 Embedding V1",
 				Type:        "embedding",
 				Size:        "medium",
 				Status:      "available",
@@ -133,7 +132,7 @@ func (mm *ModelManager) ListModels() ([]ModelInfo, error) {
 			},
 			{
 				ID:          "text-embedding-v2",
-				Name:        "DashScope Embedding V2",
+				Name:        "阿里百炼 Embedding V2",
 				Type:        "embedding",
 				Size:        "large",
 				Status:      "available",

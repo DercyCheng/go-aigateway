@@ -204,9 +204,8 @@ func (ap *AliyunProvider) GetServices() ([]ServiceInfo, error) {
 			},
 			CreatedAt: time.Now().Add(-24 * time.Hour),
 			UpdatedAt: time.Now().Add(-1 * time.Hour),
-		},
-		{
-			Name:      "dashscope-api",
+		}, {
+			Name:      "alililian-api",
 			Type:      "API Gateway",
 			Status:    "running",
 			Instances: 1,
@@ -214,7 +213,7 @@ func (ap *AliyunProvider) GetServices() ([]ServiceInfo, error) {
 			Endpoint:  "https://dashscope.aliyuncs.com",
 			Tags: map[string]string{
 				"environment": "production",
-				"service":     "dashscope",
+				"service":     "alililian",
 			},
 			CreatedAt: time.Now().Add(-72 * time.Hour),
 			UpdatedAt: time.Now().Add(-30 * time.Minute),

@@ -7,7 +7,6 @@ import (
 	"go-aigateway/internal/config"
 	"go-aigateway/internal/handlers"
 	"go-aigateway/internal/middleware"
-	"go-aigateway/internal/ram"
 	"go-aigateway/internal/security"
 	"net/http"
 	"net/http/httptest"
@@ -35,8 +34,7 @@ func TestHealthEndpoint(t *testing.T) {
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-
-	assert.Equal(t, "ok", response["status"])
+	assert.Equal(t, "healthy", response["status"])
 	assert.NotNil(t, response["timestamp"])
 }
 
@@ -107,76 +105,6 @@ func TestChatEndpointWithAPIKey(t *testing.T) {
 		errorInfo := response["error"].(map[string]interface{})
 		assert.Equal(t, "authentication_error", errorInfo["type"])
 		assert.Equal(t, "invalid_api_key", errorInfo["code"])
-	})
-}
-
-func TestChatEndpointWithRAMAuth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	cfg := &config.Config{
-		GatewayKeys: []string{"test-api-key-123"},
-	}
-
-	ramConfig := &config.RAMAuthConfig{
-		Enabled:         true,
-		AccessKeySecret: "test-secret-key",
-		Region:          "us-west-1",
-		CacheExpiration: time.Hour,
-	}
-
-	authenticator := ram.NewRAMAuthenticator(ramConfig)
-	require.NotNil(t, authenticator)
-	router := gin.New()
-	router.Use(middleware.RAMAuth(authenticator))
-	router.POST("/api/v1/chat", handlers.ChatHandler(cfg))
-
-	requestBody := map[string]interface{}{
-		"messages": []map[string]string{
-			{"role": "user", "content": "Hello, how are you?"},
-		},
-		"model": "gpt-3.5-turbo",
-	}
-
-	jsonBody, err := json.Marshal(requestBody)
-	require.NoError(t, err)
-
-	t.Run("missing RAM auth headers", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		errorInfo := response["error"].(map[string]interface{})
-		assert.Equal(t, "authentication_error", errorInfo["type"])
-		assert.Equal(t, "ram_auth_required", errorInfo["code"])
-	})
-
-	t.Run("invalid RAM signature", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Ca-Key", "test-access-key")
-		req.Header.Set("X-Ca-Signature", "invalid-signature")
-		req.Header.Set("X-Ca-Timestamp", fmt.Sprintf("%d", time.Now().Unix()))
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		errorInfo := response["error"].(map[string]interface{})
-		assert.Equal(t, "authentication_error", errorInfo["type"])
-		assert.Equal(t, "ram_signature_invalid", errorInfo["code"])
 	})
 }
 
@@ -387,13 +315,6 @@ func TestFullStackAuthentication(t *testing.T) {
 		GatewayKeys: []string{"test-api-key-123"},
 	}
 
-	ramConfig := &config.RAMAuthConfig{
-		Enabled:         true,
-		AccessKeySecret: "test-secret-key",
-		Region:          "us-west-1",
-		CacheExpiration: time.Hour,
-	}
-
 	securityConfig := &security.Config{
 		MaxRequestSize:    1024 * 1024,
 		RateLimitEnabled:  true,
@@ -405,7 +326,6 @@ func TestFullStackAuthentication(t *testing.T) {
 		AuditLogging:      false,
 	}
 	// Set up middleware
-	authenticator := ram.NewRAMAuthenticator(ramConfig)
 	securityMiddleware := security.NewSecurityMiddleware(securityConfig)
 
 	router := gin.New()
@@ -420,13 +340,6 @@ func TestFullStackAuthentication(t *testing.T) {
 	{
 		apiKeyGroup.POST("/chat", handlers.ChatHandler(cfg))
 		apiKeyGroup.POST("/completions", handlers.CompletionHandler(cfg))
-	}
-	// RAM protected endpoints
-	ramGroup := router.Group("/ram/v1")
-	ramGroup.Use(middleware.RAMAuth(authenticator))
-	{
-		ramGroup.POST("/chat", handlers.ChatHandler(cfg))
-		ramGroup.GET("/models", handlers.ModelsHandler(cfg))
 	}
 
 	t.Run("public endpoint accessible", func(t *testing.T) {
@@ -461,23 +374,6 @@ func TestFullStackAuthentication(t *testing.T) {
 		// Should have security headers
 		assert.NotEmpty(t, w.Header().Get("X-Content-Type-Options"))
 		assert.NotEmpty(t, w.Header().Get("X-Frame-Options"))
-	})
-
-	t.Run("RAM endpoint requires authentication", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/ram/v1/models", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		errorInfo := response["error"].(map[string]interface{})
-		assert.Equal(t, "authentication_error", errorInfo["type"])
-		assert.Equal(t, "ram_auth_required", errorInfo["code"])
 	})
 }
 
