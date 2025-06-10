@@ -124,9 +124,9 @@ def initialize_third_party_model():
     global third_party_client, use_third_party
     
     # Get configuration from environment variables
-    api_key = os.getenv('DASHSCOPE_API_KEY')
+    api_key = os.getenv('BAILIAN_API_KEY')
     if not api_key:
-        raise ValueError("DASHSCOPE_API_KEY environment variable is required for third-party models")
+        raise ValueError("BAILIAN_API_KEY environment variable is required for third-party models")
     
     base_url = THIRD_PARTY_MODELS["dashscope"]["base_url"]
     

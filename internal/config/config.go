@@ -263,7 +263,7 @@ func New() *Config {
 			ThirdParty: ThirdPartyModelConfig{
 				Enabled:      getEnvBool("THIRD_PARTY_MODEL_ENABLED", false),
 				Provider:     getEnv("THIRD_PARTY_MODEL_PROVIDER", "alililian"),
-				APIKey:       getEnv("THIRD_PARTY_MODEL_API_KEY", getEnv("DASHSCOPE_API_KEY", "")),
+				APIKey:       getEnv("THIRD_PARTY_MODEL_API_KEY", getEnv("BAILIAN_API_KEY", "")),
 				BaseURL:      getEnv("THIRD_PARTY_MODEL_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
 				DefaultModel: getEnv("THIRD_PARTY_MODEL_DEFAULT", "qwen-turbo"),
 			},

@@ -190,7 +190,7 @@ func (pms *PythonModelServer) Start(ctx context.Context) error {
 	// Set environment variables for third-party configuration
 	cmd.Env = os.Environ()
 	if pms.config.ThirdParty.Enabled && pms.config.ThirdParty.APIKey != "" {
-		cmd.Env = append(cmd.Env, "DASHSCOPE_API_KEY="+pms.config.ThirdParty.APIKey)
+		cmd.Env = append(cmd.Env, "BAILIAN_API_KEY="+pms.config.ThirdParty.APIKey)
 		cmd.Env = append(cmd.Env, "USE_THIRD_PARTY_MODEL=true")
 	}
 

@@ -42,3 +42,5 @@ docker-compose.override.yml
 
 node_modules/
 venv/
+
+__pycache__/
