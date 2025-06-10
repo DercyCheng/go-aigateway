@@ -64,19 +64,6 @@ RUN mkdir -p /app/models /app/cache /app/logs && \
 # 设置工作目录权限
 RUN chmod +x /app/*.py
 
-# 下载默认小型模型到缓存 (可选，加速首次启动)
-# 注意：这会增加镜像大小，建议在生产环境中移除
-RUN python -c "
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import os
-os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-try:
-    tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0')
-    print('Default model tokenizer cached successfully')
-except Exception as e:
-    print(f'Model caching failed: {e}')
-"
-
 # 切换到非root用户
 USER aimodel
 

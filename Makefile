@@ -52,7 +52,7 @@ dev-up: check-deps ## 启动开发环境
 	@echo "$(BLUE)启动开发环境...$(NC)"
 	@$(DOCKER_COMPOSE_DEV) --env-file $(ENV_DEV) up -d
 	@echo "$(GREEN)✅ 开发环境已启动$(NC)"
-	@echo "$(YELLOW)前端: http://localhost:3000$(NC)"
+	@echo "$(YELLOW)前端: http://localhost:5173$(NC)"
 	@echo "$(YELLOW)后端: http://localhost:8080$(NC)"
 	@echo "$(YELLOW)模型: http://localhost:5000$(NC)"
 
@@ -162,7 +162,7 @@ health-check: ## 检查服务健康状态
 	@echo "$(BLUE)检查服务健康状态...$(NC)"
 	@curl -f http://localhost:8080/health && echo "$(GREEN)✅ 后端服务正常$(NC)" || echo "$(RED)❌ 后端服务异常$(NC)"
 	@curl -f http://localhost:5000/health && echo "$(GREEN)✅ 模型服务正常$(NC)" || echo "$(RED)❌ 模型服务异常$(NC)"
-	@curl -f http://localhost:3000 && echo "$(GREEN)✅ 前端服务正常$(NC)" || echo "$(RED)❌ 前端服务异常$(NC)"
+	@curl -f http://localhost:5173 && echo "$(GREEN)✅ 前端服务正常$(NC)" || echo "$(RED)❌ 前端服务异常$(NC)"
 
 .PHONY: test
 test: ## 运行测试

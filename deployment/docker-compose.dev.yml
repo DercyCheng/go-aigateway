@@ -149,7 +149,7 @@ services:
       # 安全配置
       - JWT_SECRET=${JWT_SECRET:-your_super_secret_jwt_key_change_in_production_2024}
       - CORS_ENABLED=true
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost
+      - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost
     volumes:
       - ../:/app:cached
       - go-mod-cache:/go/pkg/mod
@@ -245,7 +245,7 @@ services:
     container_name: aigateway-frontend-dev
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "5173:5173"
     environment:
       - NODE_ENV=development
       - VITE_API_BASE_URL=http://localhost:8080
@@ -257,7 +257,7 @@ services:
     networks:
       - aigateway-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
       interval: 30s
       timeout: 10s
       retries: 3
