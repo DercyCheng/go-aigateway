@@ -1,71 +1,159 @@
+# AI Gateway 开发环境 Docker Compose (中国内地优化版)
+# ============================================
+# 服务编排配置
+# ============================================
 version: '3.8'
 
+# 自定义网络
+networks:
+  aigateway-network:
+    driver: bridge
+    name: aigateway-dev-network
+
+# 数据卷配置 (持久化开发数据)
+volumes:
+  # Go模块缓存，加速构建
+  go-mod-cache:
+    name: aigateway-go-mod-cache
+  
+  # Python包缓存，加速安装
+  python-cache:
+    name: aigateway-python-cache
+  
+  # Node.js模块缓存，加速安装
+  node-modules-cache:
+    name: aigateway-node-modules-cache
+  
+  # 模型文件存储
+  model-storage:
+    name: aigateway-model-storage
+  
+  # Redis数据持久化
+  redis-data:
+    name: aigateway-redis-data
+  
+  # PostgreSQL数据持久化
+  postgres-data:
+    name: aigateway-postgres-data
+
 services:
-  # Redis 服务
+  # ============================================
+  # 基础设施服务
+  # ============================================
+  
+  # Redis 缓存服务
   redis:
-    image: redis:7-alpine
-    container_name: go-aigateway-redis
+    image: redis:7.2-alpine
+    container_name: aigateway-redis-dev
+    restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     networks:
       - aigateway-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # PostgreSQL 数据库 (可选)
+  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
-    container_name: go-aigateway-postgres
-    environment:
-      POSTGRES_DB: aigateway
-      POSTGRES_USER: aigateway
-      POSTGRES_PASSWORD: aigateway123
+    container_name: aigateway-postgres-dev
+    restart: unless-stopped
     ports:
       - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-aigateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aigateway_password_2024}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     networks:
       - aigateway-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aigateway"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aigateway} -d ${POSTGRES_DB:-ai_gateway}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Go 后端服务
+  # ============================================
+  # 应用服务层
+  # ============================================
+  
+  # Go 后端服务 (API网关)
   go-backend:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile.go
-    container_name: go-aigateway-backend
+      dockerfile: deployment/Dockerfile.backend
+      target: development
+      args:
+        - GOPROXY=https://goproxy.cn,direct
+        - GOSUMDB=sum.golang.google.cn
+    container_name: aigateway-backend-dev
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080"   # HTTP API端口
+      - "9090:9090"   # gRPC端口
+      - "9091:9091"   # 监控指标端口
     environment:
+      # 基础配置
       - ENV=development
+      - DEBUG=true
+      - PORT=8080
+      - GRPC_PORT=9090
+      - METRICS_PORT=9091
+      
+      # 数据库配置
+      - DATABASE_URL=postgres://${POSTGRES_USER:-aigateway}:${POSTGRES_PASSWORD:-aigateway_password_2024}@postgres:5432/${POSTGRES_DB:-ai_gateway}?sslmode=disable
+      
+      # Redis配置
       - REDIS_ENABLED=true
       - REDIS_ADDR=redis:6379
-      - REDIS_PASSWORD=
       - REDIS_DB=0
-      - REDIS_POOL_SIZE=10
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=aigateway
-      - DB_USER=aigateway
-      - DB_PASSWORD=aigateway123
-      - GOPROXY=https://goproxy.cn,direct
-      - GOSUMDB=sum.golang.google.cn
+      
+      # 本地模型配置
+      - LOCAL_MODEL_ENABLED=true
+      - LOCAL_MODEL_HOST=python-models
+      - LOCAL_MODEL_PORT=5000
+      
+      # 服务发现配置
+      - SERVICE_DISCOVERY_ENABLED=true
+      - SERVICE_DISCOVERY_TYPE=static
+      
+      # 协议转换配置
+      - PROTOCOL_CONVERSION_ENABLED=true
+      - HTTP_TO_GRPC_ENABLED=true
+      
+      # 监控配置
+      - MONITORING_ENABLED=true
+      - PROMETHEUS_ENABLED=true
+      
+      # 安全配置
+      - JWT_SECRET=${JWT_SECRET:-your_super_secret_jwt_key_change_in_production_2024}
+      - CORS_ENABLED=true
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost
     volumes:
-      - ../:/app
-      - go_modules:/go/pkg/mod
-    working_dir: /app
-    command: ["go", "run", "main.go"]
+      - ../:/app:cached
+      - go-mod-cache:/go/pkg/mod
+      - ../deployment/.air.toml:/app/.air.toml:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -73,76 +161,178 @@ services:
         condition: service_healthy
     networks:
       - aigateway-network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # Python 模型服务
   python-models:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile.python
-    container_name: go-aigateway-python
+      dockerfile: deployment/Dockerfile.model
+      target: development
+      args:
+        - PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+        - PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+    container_name: aigateway-python-dev
+    restart: unless-stopped
     ports:
       - "5000:5000"
     environment:
+      # 基础配置
       - FLASK_ENV=development
-      - FLASK_DEBUG=1
-      - PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-      - PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+      - FLASK_DEBUG=true
+      - HOST=0.0.0.0
+      - PORT=5000
+      
+      # 模型配置
+      - MODEL_TYPE=chat
+      - MODEL_SIZE=small
+      - MODEL_PATH=/app/models
+      - CACHE_DIR=/app/cache
+      
+      # 第三方API配置
+      - USE_THIRD_PARTY=${USE_THIRD_PARTY_MODEL:-false}
+      - BAILIAN_API_KEY=${BAILIAN_API_KEY:-}
+      
+      # Hugging Face镜像源 (中国内地优化)
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_HOME=/app/cache/huggingface
     volumes:
-      - ../python:/app
-      - python_packages:/root/.cache/pip
-    working_dir: /app
-    command: ["python", "server.py"]
+      - ../python:/app:cached
+      - python-cache:/root/.cache/pip
+      - model-storage:/app/models
+      - ../python/cache:/app/cache
     networks:
       - aigateway-network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # 资源限制 (避免模型服务占用过多资源)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
 
   # React 前端服务
   react-frontend:
     build:
       context: ..
-      dockerfile: deployment/Dockerfile.react
-    container_name: go-aigateway-frontend
+      dockerfile: deployment/Dockerfile.frontend
+      target: development
+      args:
+        - NPM_REGISTRY=https://registry.npmmirror.com
+    container_name: aigateway-frontend-dev
+    restart: unless-stopped
     ports:
-      - "3000:5173"
+      - "3000:3000"
     environment:
       - NODE_ENV=development
-      - VITE_API_URL=http://localhost:8080
-      - NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+      - VITE_API_BASE_URL=http://localhost:8080
+      - VITE_WS_BASE_URL=ws://localhost:8080
+      - CHOKIDAR_USEPOLLING=true  # 支持Docker内文件监听
     volumes:
-      - ../frontend:/app
-      - node_modules:/app/node_modules
-    working_dir: /app
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
-    depends_on:
-      - go-backend
+      - ../frontend:/app:cached
+      - node-modules-cache:/app/node_modules
     networks:
       - aigateway-network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
+  # ============================================
+  # 可选服务 (按需启用)
+  # ============================================
+  
   # Nginx 反向代理 (可选)
   nginx:
-    image: nginx:alpine
-    container_name: go-aigateway-nginx
+    image: nginx:1.24-alpine
+    container_name: aigateway-nginx-dev
+    restart: unless-stopped
     ports:
       - "80:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx-dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - go-backend
       - react-frontend
-      - python-models
     networks:
       - aigateway-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles:
+      - nginx  # 使用 docker-compose --profile nginx up 启用
+
+  # Consul 服务发现 (可选)
+  consul:
+    image: consul:1.16
+    container_name: aigateway-consul-dev
     restart: unless-stopped
+    ports:
+      - "8500:8500"
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+    command: >
+      consul agent -server -bootstrap-expect=1 -ui -bind=0.0.0.0 
+      -client=0.0.0.0 -datacenter=dc1 -node=consul-dev
+    networks:
+      - aigateway-network
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles:
+      - consul  # 使用 docker-compose --profile consul up 启用
 
-volumes:
-  redis_data:
-  postgres_data:
-  go_modules:
-  python_packages:
-  node_modules:
+# ============================================
+# 扩展配置
+# ============================================
 
-networks:
-  aigateway-network:
-    driver: bridge
+# 默认环境变量 (可通过.env文件覆盖)
+x-common-variables: &common-variables
+  TZ: Asia/Shanghai
+  LANG: zh_CN.UTF-8

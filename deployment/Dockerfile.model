@@ -1,0 +1,141 @@
+# Python 模型服务 Dockerfile (中国内地优化版)
+# ============================================
+# 阶段1: 基础环境构建 (优化构建时间)
+# ============================================
+FROM python:3.11-slim-bullseye AS base
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 设置时区为中国
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 使用中国镜像源加速包安装
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 一次性安装所有系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    g++ \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# 设置中国PyPI镜像源
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# ============================================
+# 阶段2: 依赖安装阶段
+# ============================================
+FROM base AS dependencies
+
+WORKDIR /app
+
+# 先复制requirements文件，利用Docker缓存
+COPY python/requirements.txt .
+
+# 升级pip并安装依赖 (使用国内镜像源)
+RUN pip install --upgrade pip && \
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
+
+# ============================================
+# 阶段3: 开发环境
+# ============================================
+FROM dependencies AS development
+
+# 创建非root用户
+RUN groupadd -r aimodel && useradd -r -g aimodel aimodel
+
+# 复制应用代码
+COPY python/ .
+
+# 创建必要目录
+RUN mkdir -p /app/models /app/cache /app/logs && \
+    chown -R aimodel:aimodel /app
+
+# 设置工作目录权限
+RUN chmod +x /app/*.py
+
+# 下载默认小型模型到缓存 (可选，加速首次启动)
+# 注意：这会增加镜像大小，建议在生产环境中移除
+RUN python -c "
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+try:
+    tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0')
+    print('Default model tokenizer cached successfully')
+except Exception as e:
+    print(f'Model caching failed: {e}')
+"
+
+# 切换到非root用户
+USER aimodel
+
+# 暴露端口
+EXPOSE 5000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# 开发环境启动命令
+CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "5000", "--model-type", "chat", "--model-size", "small"]
+
+# ============================================
+# 阶段4: 生产环境 (最小镜像)
+# ============================================
+FROM python:3.11-slim-bullseye AS production
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TZ=Asia/Shanghai
+
+# 设置时区
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 使用中国镜像源
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非root用户
+RUN groupadd -r aimodel && useradd -r -g aimodel aimodel
+
+WORKDIR /app
+
+# 从依赖阶段复制Python包
+COPY --from=dependencies /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=dependencies /usr/local/bin /usr/local/bin
+
+# 复制应用代码
+COPY python/ .
+
+# 创建必要目录并设置权限
+RUN mkdir -p /app/models /app/cache /app/logs && \
+    chown -R aimodel:aimodel /app
+
+# 切换到非root用户
+USER aimodel
+
+# 暴露端口
+EXPOSE 5000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# 生产环境启动命令
+CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "5000"]

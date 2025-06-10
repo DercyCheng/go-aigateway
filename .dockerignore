@@ -1,0 +1,74 @@
+# Git
+.git
+.gitignore
+README.md
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Dependencies (will be installed in container)
+node_modules/
+venv/
+__pycache__/
+
+# Build outputs
+build/
+bin/
+dist/
+
+# Test files
+*_test.go
+*.test
+test/
+tests/
+
+# Environment files
+.env*
+!.env
+
+# Temporary files
+*.tmp
+*.temp
+
+# Cache
+.cache/
+.npm/
+.yarn/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.Python
+*.so
+
+# Go
+vendor/
+go.work
+
+# Models (will be downloaded in container)
+models/
+*.bin
+*.safetensors
+
+# Documentation
+docs/
+*.md
+!README.md

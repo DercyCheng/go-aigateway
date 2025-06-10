@@ -1,0 +1,120 @@
+# Go 后端 Dockerfile (中国内地优化版)
+# ============================================
+# 阶段1: 构建阶段 (优化构建时间)
+# ============================================
+FROM golang:1.22-alpine AS builder
+
+# 设置中国镜像源以加速下载
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main" > /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v3.18/community" >> /etc/apk/repositories
+
+# 一次性安装所有必要工具，减少层数
+RUN apk add --no-cache git gcc musl-dev tzdata ca-certificates
+
+# 设置时区为中国
+ENV TZ=Asia/Shanghai
+
+# 设置Go代理为中国镜像，提升下载速度
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+ENV GOOS=linux
+
+WORKDIR /app
+
+# 优化：先复制依赖文件，利用Docker缓存
+COPY go.mod go.sum ./
+
+# 下载依赖 (利用缓存层)
+RUN go mod download && go mod verify
+
+# 复制源代码
+COPY . .
+
+# 构建二进制文件，启用优化
+RUN go build -ldflags="-w -s" -a -installsuffix cgo -o main .
+
+# ============================================
+# 阶段2: 开发运行环境
+# ============================================
+FROM golang:1.22-alpine AS development
+
+# 设置中国镜像源
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main" > /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v3.18/community" >> /etc/apk/repositories
+
+# 安装开发工具
+RUN apk add --no-cache git gcc musl-dev bash curl
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+
+# 设置Go环境
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
+ENV GO111MODULE=on
+
+# 安装air用于热重载 (使用特定版本确保兼容性)
+RUN go install github.com/cosmtrek/air@v1.49.0
+
+WORKDIR /app
+
+# 创建配置文件目录
+RUN mkdir -p /app/config /app/logs /app/cache
+
+# 设置权限
+RUN chmod 755 /app
+
+# 暴露端口
+EXPOSE 8080 9090 9091
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# 开发环境使用air热重载
+CMD ["air", "-c", ".air.toml"]
+
+# ============================================
+# 阶段3: 生产运行环境 (最小镜像)
+# ============================================
+FROM alpine:3.18 AS production
+
+# 设置中国镜像源
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main" > /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v3.18/community" >> /etc/apk/repositories
+
+# 安装运行时依赖
+RUN apk add --no-cache ca-certificates tzdata curl
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 创建非root用户
+RUN addgroup -g 1001 -S aigateway && \
+    adduser -u 1001 -S aigateway -G aigateway
+
+WORKDIR /app
+
+# 从构建阶段复制二进制文件
+COPY --from=builder /app/main .
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# 创建必要目录并设置权限
+RUN mkdir -p /app/config /app/logs /app/cache && \
+    chown -R aigateway:aigateway /app
+
+# 切换到非root用户
+USER aigateway
+
+# 暴露端口
+EXPOSE 8080 9090 9091
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# 启动应用
+CMD ["./main"]

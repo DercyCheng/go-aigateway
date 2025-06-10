@@ -1,0 +1,374 @@
+# AI Gateway 生产环境 Docker Compose
+# ============================================
+# 生产级服务编排配置
+# ============================================
+version: '3.8'
+
+# 自定义网络
+networks:
+  aigateway-prod:
+    driver: bridge
+    name: aigateway-production
+
+# 持久化数据卷
+volumes:
+  postgres-prod-data:
+    name: aigateway-postgres-prod
+  redis-prod-data:
+    name: aigateway-redis-prod
+  model-storage-prod:
+    name: aigateway-models-prod
+  logs-prod:
+    name: aigateway-logs-prod
+
+services:
+  # ============================================
+  # 基础设施服务
+  # ============================================
+  
+  # Redis 缓存服务 (生产配置)
+  redis:
+    image: redis:7.2-alpine
+    container_name: aigateway-redis-prod
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"  # 只绑定到本地
+    volumes:
+      - redis-prod-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.2'
+
+  # PostgreSQL 数据库 (生产配置)
+  postgres:
+    image: postgres:15-alpine
+    container_name: aigateway-postgres-prod
+    restart: always
+    ports:
+      - "127.0.0.1:5432:5432"  # 只绑定到本地
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-prod-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ============================================
+  # 应用服务层
+  # ============================================
+  
+  # Go 后端服务 (生产配置)
+  go-backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      target: production
+      args:
+        - GOPROXY=https://goproxy.cn,direct
+        - GOSUMDB=sum.golang.google.cn
+    image: aigateway-backend:latest
+    container_name: aigateway-backend-prod
+    restart: always
+    ports:
+      - "8080:8080"   # HTTP API端口
+      - "9090:9090"   # gRPC端口
+      - "127.0.0.1:9091:9091"   # 监控指标端口 (只绑定本地)
+    environment:
+      - ENV=production
+      - DEBUG=false
+      - PORT=8080
+      - GRPC_PORT=9090
+      - METRICS_PORT=9091
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require
+      - REDIS_ENABLED=true
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - SERVICE_DISCOVERY_ENABLED=true
+      - SERVICE_DISCOVERY_TYPE=${SERVICE_DISCOVERY_TYPE}
+      - CONSUL_ADDR=${CONSUL_ADDR}
+      - PROTOCOL_CONVERSION_ENABLED=true
+      - HTTP_TO_GRPC_ENABLED=true
+      - MONITORING_ENABLED=true
+      - PROMETHEUS_ENABLED=true
+      - JWT_SECRET=${JWT_SECRET}
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    volumes:
+      - logs-prod:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      replicas: 2  # 多实例部署
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Python 模型服务 (生产配置)
+  python-models:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.model
+      target: production
+      args:
+        - PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+        - PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+    image: aigateway-models:latest
+    container_name: aigateway-python-prod
+    restart: always
+    ports:
+      - "127.0.0.1:5000:5000"  # 只绑定到本地
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=5000
+      - MODEL_TYPE=chat
+      - MODEL_SIZE=medium
+      - MODEL_PATH=/app/models
+      - USE_THIRD_PARTY=${USE_THIRD_PARTY_MODEL}
+      - BAILIAN_API_KEY=${BAILIAN_API_KEY}
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_HOME=/app/cache/huggingface
+      - WORKERS=4  # 多进程
+    volumes:
+      - model-storage-prod:/app/models:ro
+      - logs-prod:/app/logs
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # React 前端服务 (生产配置)
+  react-frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+      target: production
+      args:
+        - NPM_REGISTRY=https://registry.npmmirror.com
+    image: aigateway-frontend:latest
+    container_name: aigateway-frontend-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./ssl:/etc/ssl/certs:ro  # SSL证书
+      - logs-prod:/var/log/nginx
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+
+  # ============================================
+  # 服务发现与监控
+  # ============================================
+  
+  # Consul 服务发现
+  consul:
+    image: consul:1.16
+    container_name: aigateway-consul-prod
+    restart: always
+    ports:
+      - "127.0.0.1:8500:8500"  # 只绑定到本地
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+    volumes:
+      - ./consul:/consul/config:ro
+    command: >
+      consul agent -server -bootstrap-expect=1 -ui -bind=0.0.0.0 
+      -client=0.0.0.0 -datacenter=dc1 -node=consul-prod
+      -config-dir=/consul/config
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aigateway-prometheus-prod
+    restart: always
+    ports:
+      - "127.0.0.1:9090:9090"  # 只绑定到本地
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.2'
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aigateway-grafana-prod
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3000"  # 只绑定到本地
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    volumes:
+      - ./grafana:/etc/grafana/provisioning:ro
+      - ./grafana-data:/var/lib/grafana
+    networks:
+      - aigateway-prod
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
