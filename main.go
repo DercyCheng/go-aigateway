@@ -235,6 +235,11 @@ func main() {
 		logrus.Info("Monitoring API routes registered")
 	}
 
+	// Setup service management routes
+	serviceHandler := handlers.NewServiceHandler()
+	handlers.RegisterServiceRoutes(r, serviceHandler)
+	logrus.Info("Service management API routes registered")
+
 	// Start background services
 	// Service discovery is automatically started in NewManager
 

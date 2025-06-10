@@ -12,42 +12,6 @@ interface LocalModel {
 }
 
 const LocalModelManagement = () => {
-    // Mock data as fallback
-    const mockModels: LocalModel[] = [
-        {
-            id: 'tiny-llama',
-            name: 'TinyLlama Chat',
-            type: 'chat',
-            size: 'small',
-            status: 'stopped',
-            description: '轻量对话模型，仅1.1B参数，适合本地部署'
-        },
-        {
-            id: 'phi-2',
-            name: 'Phi-2',
-            type: 'completion',
-            size: 'small',
-            status: 'stopped',
-            description: '微软研发的高性能小模型，性能优秀'
-        },
-        {
-            id: 'miniLM',
-            name: 'MiniLM Embeddings',
-            type: 'embedding',
-            size: 'small',
-            status: 'stopped',
-            description: '文本向量嵌入模型，适合本地部署'
-        },
-        {
-            id: 'mistral-7b',
-            name: 'Mistral-7B',
-            type: 'chat',
-            size: 'large',
-            status: 'stopped',
-            description: '高性能开源大模型，7B参数'
-        }
-    ];
-
     const [models, setModels] = useState<LocalModel[]>([]);
 
     const [selectedModel, setSelectedModel] = useState<LocalModel | null>(null);
@@ -68,13 +32,11 @@ const LocalModelManagement = () => {
                 setModels(response.data.models);
             } else {
                 console.error('Error fetching models:', response.error || 'Unknown error');
-                // Fallback to mock data
-                setModels(mockModels);
+                setModels([]);
             }
         } catch (error) {
             console.error('Error fetching models:', error);
-            // Fallback to mock data
-            setModels(mockModels);
+            setModels([]);
         } finally {
             setIsLoading(false);
         }

@@ -26,40 +26,6 @@ const ServiceSources = () => {
         description: ''
     })
 
-    // Mock data as fallback
-    const mockSources: ServiceSource[] = [
-        {
-            id: '1',
-            name: 'OpenAI GPT-4',
-            type: 'openai',
-            endpoint: 'https://api.openai.com/v1',
-            apiKey: 'sk-***...***abc',
-            status: 'active',
-            description: 'OpenAI GPT-4 API 服务',
-            createdAt: '2024-01-15'
-        },
-        {
-            id: '2',
-            name: 'Claude API',
-            type: 'anthropic',
-            endpoint: 'https://api.anthropic.com/v1',
-            apiKey: 'sk-ant-***...***xyz',
-            status: 'active',
-            description: 'Anthropic Claude API 服务',
-            createdAt: '2024-01-16'
-        },
-        {
-            id: '3',
-            name: 'Gemini Pro',
-            type: 'google',
-            endpoint: 'https://generativelanguage.googleapis.com/v1',
-            apiKey: 'AIza***...***123',
-            status: 'inactive',
-            description: 'Google Gemini Pro API 服务',
-            createdAt: '2024-01-17'
-        }
-    ]
-
     // Fetch service sources from API
     useEffect(() => {
         fetchServiceSources()
@@ -68,16 +34,15 @@ const ServiceSources = () => {
     const fetchServiceSources = async () => {
         try {
             const response = await apiService.getServiceSources()
-            if (response && Array.isArray(response)) {
-                setSources(response)
+            if (response.success && response.data && Array.isArray(response.data)) {
+                setSources(response.data)
             } else {
-                // Fallback to mock data if API fails
-                setSources(mockSources)
+                console.error('Error fetching service sources:', response.error || 'Unknown error');
+                setSources([]);
             }
         } catch (error) {
             console.error('Failed to fetch service sources:', error)
-            // Fallback to mock data
-            setSources(mockSources)
+            setSources([])
         } finally {
             setIsLoading(false)
         }

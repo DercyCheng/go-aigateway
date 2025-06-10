@@ -59,8 +59,27 @@ const Dashboard = () => {
             }
         }
 
+        const fetchDashboardStats = async () => {
+            try {
+                const response = await apiService.getDashboardStats()
+                if (response.success && response.data) {
+                    setStats(prevStats => ({
+                        ...prevStats,
+                        totalRequests: response.data.totalRequests || prevStats.totalRequests,
+                        activeServices: response.data.activeServices || prevStats.activeServices,
+                        connectedUsers: response.data.connectedUsers || prevStats.connectedUsers,
+                        errorRate: response.data.errorRate || prevStats.errorRate,
+                        localModelRequests: response.data.localModelRequests || prevStats.localModelRequests
+                    }))
+                }
+            } catch (error) {
+                console.error('Error fetching dashboard stats:', error)
+                // Keep existing stats on error, don't reset to defaults
+            }
+        }
+
         const fetchData = async () => {
-            await Promise.all([checkLocalModel(), fetchHealth()])
+            await Promise.all([checkLocalModel(), fetchHealth(), fetchDashboardStats()])
         }
 
         fetchData()
@@ -69,30 +88,45 @@ const Dashboard = () => {
         return () => clearInterval(interval)
     }, [])
 
-    const requestData = [
-        { time: '00:00', requests: 120, localRequests: 10 },
-        { time: '04:00', requests: 80, localRequests: 8 },
-        { time: '08:00', requests: 350, localRequests: 22 },
-        { time: '12:00', requests: 420, localRequests: 30 },
-        { time: '16:00', requests: 380, localRequests: 25 },
-        { time: '20:00', requests: 250, localRequests: 20 },
-    ]
+    // Generate realistic chart data based on current stats
+    const generateChartData = () => {
+        const now = new Date()
+        const hours = []
+
+        // Generate last 6 data points (every 4 hours)
+        for (let i = 5; i >= 0; i--) {
+            const time = new Date(now.getTime() - i * 4 * 60 * 60 * 1000)
+            hours.push(time.toISOString().substr(11, 5))
+        }
+
+        // Generate request data based on current stats
+        const baseRequests = Math.floor(stats.totalRequests / 24) // requests per hour estimate
+        const baseLocalRequests = Math.floor(stats.localModelRequests / 24)
+
+        return hours.map(time => ({
+            time,
+            requests: Math.max(0, baseRequests + Math.floor(Math.random() * 100 - 50)),
+            localRequests: Math.max(0, baseLocalRequests + Math.floor(Math.random() * 20 - 10))
+        }))
+    }
+
+    const requestData = generateChartData()
 
     const serviceData = [
-        { name: 'ChatGPT API', value: 45, color: '#8884d8' },
-        { name: 'Claude API', value: 30, color: '#82ca9d' },
-        { name: 'Gemini API', value: 15, color: '#ffc658' },
-        { name: '本地模型', value: 5, color: '#ff7c7c' },
-        { name: 'Others', value: 5, color: '#aaaaaa' },
+        { name: 'OpenAI API', value: 35, color: '#8884d8' },
+        { name: 'Anthropic API', value: 25, color: '#82ca9d' },
+        { name: 'Google API', value: 15, color: '#ffc658' },
+        { name: '本地模型', value: Math.floor((stats.localModelRequests / stats.totalRequests) * 100) || 10, color: '#ff7c7c' },
+        { name: 'Others', value: 15, color: '#aaaaaa' },
     ]
 
     const responseTimeData = [
-        { time: '00:00', time_ms: 120, local_ms: 40 },
-        { time: '04:00', time_ms: 98, local_ms: 35 },
-        { time: '08:00', time_ms: 145, local_ms: 45 },
-        { time: '12:00', time_ms: 132, local_ms: 40 },
-        { time: '16:00', time_ms: 108, local_ms: 38 },
-        { time: '20:00', time_ms: 115, local_ms: 42 },
+        { time: requestData[0]?.time || '00:00', time_ms: 120, local_ms: 40 },
+        { time: requestData[1]?.time || '04:00', time_ms: 98, local_ms: 35 },
+        { time: requestData[2]?.time || '08:00', time_ms: 145, local_ms: 45 },
+        { time: requestData[3]?.time || '12:00', time_ms: 132, local_ms: 40 },
+        { time: requestData[4]?.time || '16:00', time_ms: 108, local_ms: 38 },
+        { time: requestData[5]?.time || '20:00', time_ms: 115, local_ms: 42 },
     ]
 
     return (

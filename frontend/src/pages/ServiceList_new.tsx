@@ -80,8 +80,13 @@ const ServiceList = () => {
                 console.warn('Could not fetch local models:', localError)
             }
 
-            // Always use real data, show empty state if no services found
-            setServices(fetchedServices)
+            // If we have real services, use them; otherwise show empty state
+            if (fetchedServices.length > 0) {
+                setServices(fetchedServices)
+            } else {
+                console.warn('No services found from backend, showing empty state')
+                setServices([])
+            }
 
         } catch (error) {
             console.error('Error fetching services:', error)

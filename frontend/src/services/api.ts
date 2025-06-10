@@ -1,6 +1,6 @@
 // API service layer for communicating with the Go backend
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 interface ApiResponse<T = any> {
     data?: T;

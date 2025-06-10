@@ -49,7 +49,10 @@ func (h *LocalModelManagerHandler) ListModels() gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"models": models,
+			"success": true,
+			"data": gin.H{
+				"models": models,
+			},
 		})
 	}
 }

@@ -41,66 +41,6 @@ const RouteConfig = () => {
         timeout: 30000
     })
 
-    // Mock data as fallback
-    const mockRoutes: RouteRule[] = [
-        {
-            id: '1',
-            name: 'ChatGPT API Route',
-            path: '/api/v1/chat/completions',
-            method: 'POST',
-            target: 'https://api.openai.com/v1/chat/completions',
-            priority: 1,
-            enabled: true,
-            conditions: {
-                headers: { 'Authorization': 'Bearer *' },
-                queryParams: {}
-            },
-            actions: {
-                rateLimit: 100,
-                timeout: 30000
-            },
-            createdAt: '2024-01-15',
-            updatedAt: '2024-01-20'
-        },
-        {
-            id: '2',
-            name: 'Claude API Route',
-            path: '/api/v1/messages',
-            method: 'POST',
-            target: 'https://api.anthropic.com/v1/messages',
-            priority: 2,
-            enabled: true,
-            conditions: {
-                headers: { 'x-api-key': '*' },
-                queryParams: {}
-            },
-            actions: {
-                rateLimit: 50,
-                timeout: 45000
-            },
-            createdAt: '2024-01-16',
-            updatedAt: '2024-01-19'
-        },
-        {
-            id: '3',
-            name: 'Gemini API Route',
-            path: '/api/v1/generate',
-            method: 'POST',
-            target: 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent',
-            priority: 3,
-            enabled: false,
-            conditions: {
-                queryParams: { 'key': '*' }
-            },
-            actions: {
-                rateLimit: 30,
-                timeout: 60000
-            },
-            createdAt: '2024-01-17',
-            updatedAt: '2024-01-18'
-        }
-    ]
-
     // Fetch routes from API
     useEffect(() => {
         fetchRoutes()
@@ -109,16 +49,15 @@ const RouteConfig = () => {
     const fetchRoutes = async () => {
         try {
             const response = await apiService.getRoutes()
-            if (response && Array.isArray(response)) {
-                setRoutes(response)
+            if (response.success && response.data && Array.isArray(response.data)) {
+                setRoutes(response.data)
             } else {
-                // Fallback to mock data if API fails
-                setRoutes(mockRoutes)
+                console.error('Error fetching routes:', response.error || 'Unknown error');
+                setRoutes([]);
             }
         } catch (error) {
             console.error('Failed to fetch routes:', error)
-            // Fallback to mock data
-            setRoutes(mockRoutes)
+            setRoutes([])
         } finally {
             setIsLoading(false)
         }
