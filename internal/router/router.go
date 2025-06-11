@@ -20,6 +20,9 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 		r.GET("/", handlers.HealthCheck)
 	}
 
+	// Test endpoint to verify configuration (no auth required)
+	r.GET("/test", handlers.TestAPIHandler(cfg))
+
 	// Metrics endpoint (no auth required)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
@@ -40,9 +43,9 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 		admin.PUT("/api-keys/:id", handlers.UpdateAPIKey(localAuth))
 	}
 
-	// API routes with local authentication
+	// API routes with API key authentication for external clients
 	api := r.Group("/v1")
-	api.Use(middleware.LocalAuth(localAuth, "api"))
+	api.Use(middleware.APIKeyAuth(cfg))
 
 	// Chat completions endpoint
 	api.POST("/chat/completions", handlers.ChatCompletions(cfg))
@@ -52,6 +55,19 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 
 	// Models endpoint
 	api.GET("/models", handlers.Models(cfg))
+
+	// Additional OpenAI-compatible endpoints
+	api.POST("/engines/:engine/completions", handlers.Completions(cfg))
+	api.POST("/engines/:engine/chat/completions", handlers.ChatCompletions(cfg))
+
+	// Legacy API routes (for backward compatibility, no auth required for testing)
+	legacy := r.Group("/api/v1")
+	{
+		legacy.POST("/chat", handlers.ChatCompletions(cfg))
+		legacy.POST("/chat/completions", handlers.ChatCompletions(cfg))
+		legacy.POST("/completions", handlers.Completions(cfg))
+		legacy.GET("/models", handlers.Models(cfg))
+	}
 }
 
 // SetupCloudRoutes sets up cloud management routes

@@ -1,0 +1,41 @@
+{
+    "datacenter": "dc1",
+    "data_dir": "/consul/data",
+    "log_level": "WARN",
+    "node_name": "consul-prod",
+    "server": true,
+    "bootstrap_expect": 3,
+    "ui_config": {
+        "enabled": true
+    },
+    "connect": {
+        "enabled": true
+    },
+    "ports": {
+        "grpc": 8502
+    },
+    "bind_addr": "0.0.0.0",
+    "client_addr": "0.0.0.0",
+    "retry_join": [
+        "consul-1",
+        "consul-2",
+        "consul-3"
+    ],
+    "encrypt": "change_me_consul_encryption_key_32_chars",
+    "acl": {
+        "enabled": true,
+        "default_policy": "deny",
+        "enable_token_persistence": true
+    },
+    "performance": {
+        "raft_multiplier": 1
+    },
+    "service": {
+        "name": "consul",
+        "port": 8500,
+        "check": {
+            "http": "http://localhost:8500/v1/status/leader",
+            "interval": "10s"
+        }
+    }
+}

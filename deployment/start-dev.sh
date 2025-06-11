@@ -61,7 +61,6 @@ check_requirements() {
     if [ "$TOTAL_MEM_GB" -lt 8 ]; then
         log_warning "可用内存不足8GB (当前: ${TOTAL_MEM_GB}GB)，可能影响模型服务性能"
     fi
-    fi
     
     # 检查磁盘空间 (至少需要5GB)
     available_space=$(df -h . | awk 'NR==2 {print $4}' | sed 's/G.*//')
@@ -90,15 +89,9 @@ setup_environment() {
     log_info "设置环境变量..."
     
     # 检查.env文件
-    if [ ! -f ".env" ]; then
-        if [ -f ".env.example" ]; then
-            log_info "复制环境变量配置文件..."
-            cp .env.example .env
-            log_warning "请检查并修改 .env 文件中的配置"
-        else
-            log_error ".env.example 文件不存在"
-            exit 1
-        fi
+    if [ ! -f ".env.development" ]; then
+        log_error ".env.development 文件不存在，请先创建"
+        exit 1
     fi
     
     # 设置中国镜像源

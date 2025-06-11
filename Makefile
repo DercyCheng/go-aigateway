@@ -36,25 +36,34 @@ check-deps: ## 检查依赖项
 	@command -v docker >/dev/null 2>&1 || { echo "$(RED)❌ Docker 未安装$(NC)"; exit 1; }
 	@command -v docker-compose >/dev/null 2>&1 || { echo "$(RED)❌ Docker Compose 未安装$(NC)"; exit 1; }
 	@docker info >/dev/null 2>&1 || { echo "$(RED)❌ Docker 未运行$(NC)"; exit 1; }
-	@echo "$(GREEN)✅ 所有依赖项检查通过$(NC)"
+	@echo "$(GREEN)✅ 环境检查通过$(NC)"
+
+.PHONY: check-env
+check-env: ## 检查环境配置文件
+	@test -f $(ENV_DEV) || { echo "$(YELLOW)⚠️  创建开发环境配置文件$(NC)"; cp deployment/.env.development.example $(ENV_DEV); }
+	@test -f $(ENV_PROD) || { echo "$(YELLOW)⚠️  创建生产环境配置文件$(NC)"; cp deployment/.env.production.example $(ENV_PROD); }
 
 # ============================================
 # 开发环境
 # ============================================
 
+.PHONY: quick-start
+quick-start: check-deps check-env dev-build dev-up ## 一键启动开发环境
+
 .PHONY: dev-build
-dev-build: check-deps ## 构建开发环境镜像
+dev-build: ## 构建开发环境镜像
 	@echo "$(BLUE)构建开发环境镜像...$(NC)"
-	@$(DOCKER_COMPOSE_DEV) --env-file $(ENV_DEV) build --no-cache --parallel
+	@$(DOCKER_COMPOSE_DEV) --env-file $(ENV_DEV) build --parallel
+	@echo "$(GREEN)✅ 开发镜像构建完成$(NC)"
 
 .PHONY: dev-up
-dev-up: check-deps ## 启动开发环境
+dev-up: check-env ## 启动开发环境
 	@echo "$(BLUE)启动开发环境...$(NC)"
 	@$(DOCKER_COMPOSE_DEV) --env-file $(ENV_DEV) up -d
-	@echo "$(GREEN)✅ 开发环境已启动$(NC)"
-	@echo "$(YELLOW)前端: http://localhost:5173$(NC)"
-	@echo "$(YELLOW)后端: http://localhost:8080$(NC)"
-	@echo "$(YELLOW)模型: http://localhost:5000$(NC)"
+	@echo "$(GREEN)✅ 开发环境启动完成$(NC)"
+	@echo "$(YELLOW)🌐 前端: http://localhost:3000$(NC)"
+	@echo "$(YELLOW)🚪 后端: http://localhost:8080$(NC)"
+	@echo "$(YELLOW)🐍 模型: http://localhost:5000$(NC)"
 
 .PHONY: dev-down
 dev-down: ## 停止开发环境
@@ -78,15 +87,16 @@ dev-status: ## 查看开发环境状态
 # ============================================
 
 .PHONY: prod-build
-prod-build: check-deps ## 构建生产环境镜像
+prod-build: ## 构建生产环境镜像
 	@echo "$(BLUE)构建生产环境镜像...$(NC)"
-	@$(DOCKER_COMPOSE_PROD) --env-file $(ENV_PROD) build --no-cache --parallel
+	@$(DOCKER_COMPOSE_PROD) --env-file $(ENV_PROD) build --parallel
+	@echo "$(GREEN)✅ 生产镜像构建完成$(NC)"
 
 .PHONY: prod-up
-prod-up: check-deps ## 启动生产环境
+prod-up: check-env ## 启动生产环境
 	@echo "$(BLUE)启动生产环境...$(NC)"
 	@$(DOCKER_COMPOSE_PROD) --env-file $(ENV_PROD) up -d
-	@echo "$(GREEN)✅ 生产环境已启动$(NC)"
+	@echo "$(GREEN)✅ 生产环境启动完成$(NC)"
 
 .PHONY: prod-down
 prod-down: ## 停止生产环境
@@ -106,30 +116,7 @@ prod-status: ## 查看生产环境状态
 	@$(DOCKER_COMPOSE_PROD) --env-file $(ENV_PROD) ps
 
 # ============================================
-# 数据库操作
-# ============================================
-
-.PHONY: db-backup
-db-backup: ## 备份数据库
-	@echo "$(BLUE)备份数据库...$(NC)"
-	@docker exec aigateway-postgres-prod pg_dump -U aigateway ai_gateway > backup_$(shell date +%Y%m%d_%H%M%S).sql
-	@echo "$(GREEN)✅ 数据库备份完成$(NC)"
-
-.PHONY: db-restore
-db-restore: ## 恢复数据库 (需要指定 FILE 参数)
-	@if [ -z "$(FILE)" ]; then echo "$(RED)❌ 请指定备份文件: make db-restore FILE=backup.sql$(NC)"; exit 1; fi
-	@echo "$(BLUE)恢复数据库...$(NC)"
-	@docker exec -i aigateway-postgres-prod psql -U aigateway ai_gateway < $(FILE)
-	@echo "$(GREEN)✅ 数据库恢复完成$(NC)"
-
-.PHONY: db-migrate
-db-migrate: ## 运行数据库迁移
-	@echo "$(BLUE)运行数据库迁移...$(NC)"
-	@docker exec aigateway-backend-prod ./main -migrate
-	@echo "$(GREEN)✅ 数据库迁移完成$(NC)"
-
-# ============================================
-# 清理操作
+# 清理
 # ============================================
 
 .PHONY: clean-dev
@@ -162,7 +149,7 @@ health-check: ## 检查服务健康状态
 	@echo "$(BLUE)检查服务健康状态...$(NC)"
 	@curl -f http://localhost:8080/health && echo "$(GREEN)✅ 后端服务正常$(NC)" || echo "$(RED)❌ 后端服务异常$(NC)"
 	@curl -f http://localhost:5000/health && echo "$(GREEN)✅ 模型服务正常$(NC)" || echo "$(RED)❌ 模型服务异常$(NC)"
-	@curl -f http://localhost:5173 && echo "$(GREEN)✅ 前端服务正常$(NC)" || echo "$(RED)❌ 前端服务异常$(NC)"
+	@curl -f http://localhost:3000 && echo "$(GREEN)✅ 前端服务正常$(NC)" || echo "$(RED)❌ 前端服务异常$(NC)"
 
 .PHONY: test
 test: ## 运行测试
@@ -206,19 +193,50 @@ update-deps: ## 更新依赖
 	@docker exec aigateway-backend-dev go mod tidy
 	@echo "$(BLUE)更新Python依赖...$(NC)"
 	@docker exec aigateway-python-dev pip install --upgrade -r requirements.txt
-	@echo "$(BLUE)更新Node.js依赖...$(NC)"
+	@echo "$(BLUE)更新前端依赖...$(NC)"
 	@docker exec aigateway-frontend-dev npm update
 	@echo "$(GREEN)✅ 依赖更新完成$(NC)"
 
+.PHONY: db-migrate
+db-migrate: ## 运行数据库迁移
+	@echo "$(BLUE)运行数据库迁移...$(NC)"
+	@docker exec aigateway-backend-dev ./scripts/migrate.sh
+	@echo "$(GREEN)✅ 数据库迁移完成$(NC)"
+
+.PHONY: db-backup
+db-backup: ## 备份数据库
+	@echo "$(BLUE)备份数据库...$(NC)"
+	@mkdir -p backups
+	@docker exec aigateway-postgres-dev pg_dump -U aigateway ai_gateway > backups/backup_$(shell date +%Y%m%d_%H%M%S).sql
+	@echo "$(GREEN)✅ 数据库备份完成$(NC)"
+
+.PHONY: db-restore
+db-restore: ## 恢复数据库 (需要指定 BACKUP_FILE)
+	@test -n "$(BACKUP_FILE)" || (echo "$(RED)❌ 请指定 BACKUP_FILE$(NC)"; exit 1)
+	@echo "$(BLUE)恢复数据库...$(NC)"
+	@docker exec -i aigateway-postgres-dev psql -U aigateway ai_gateway < $(BACKUP_FILE)
+	@echo "$(GREEN)✅ 数据库恢复完成$(NC)"
+
 # ============================================
-# 快速启动命令
+# 监控
 # ============================================
 
-.PHONY: quick-start
-quick-start: check-deps dev-build dev-up ## 快速启动开发环境
+.PHONY: monitor-up
+monitor-up: ## 启动监控服务
+	@echo "$(BLUE)启动监控服务...$(NC)"
+	@docker-compose -f deployment/docker-compose.monitor.yml up -d
+	@echo "$(GREEN)✅ 监控服务启动完成$(NC)"
+	@echo "$(YELLOW)📊 Prometheus: http://localhost:9090$(NC)"
+	@echo "$(YELLOW)📈 Grafana: http://localhost:3001$(NC)"
 
-.PHONY: quick-prod
-quick-prod: check-deps prod-build prod-up ## 快速启动生产环境
+.PHONY: monitor-down
+monitor-down: ## 停止监控服务
+	@echo "$(BLUE)停止监控服务...$(NC)"
+	@docker-compose -f deployment/docker-compose.monitor.yml down
+	@echo "$(GREEN)✅ 监控服务已停止$(NC)"
 
+# ============================================
 # 默认目标
+# ============================================
+
 .DEFAULT_GOAL := help

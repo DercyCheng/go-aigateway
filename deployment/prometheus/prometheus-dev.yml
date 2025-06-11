@@ -1,0 +1,50 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # AI Gateway 后端服务
+  - job_name: "ai-gateway-backend"
+    static_configs:
+      - targets: ["go-backend:8080"]
+    metrics_path: "/metrics"
+    scrape_interval: 5s
+
+  # Python 模型服务
+  - job_name: "ai-gateway-python"
+    static_configs:
+      - targets: ["python-models:5000"]
+    metrics_path: "/metrics"
+    scrape_interval: 10s
+
+  # Redis
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis:6379"]
+
+  # PostgreSQL
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres:5432"]
+
+  # Consul
+  - job_name: "consul"
+    static_configs:
+      - targets: ["consul:8500"]
+    metrics_path: "/v1/agent/metrics"
+    params:
+      format: ["prometheus"]
+
+  # Docker 容器监控
+  - job_name: "docker"
+    static_configs:
+      - targets: ["host.docker.internal:9323"]
+
+  # Prometheus 自监控
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

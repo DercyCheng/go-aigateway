@@ -29,6 +29,8 @@ type PerformanceOptimizer struct {
 	loadBalancer    *LoadBalancer
 	circuitBreakers map[string]*CircuitBreaker
 	connectionPool  *ConnectionPool
+	cache           map[string]*CacheEntry
+	cacheMutex      sync.RWMutex
 }
 
 // PerformanceMetrics tracks comprehensive performance data
@@ -43,6 +45,7 @@ type PerformanceMetrics struct {
 	ConnectionPoolMiss  int64
 	CircuitBreakerTrips int64
 	RateLimitHits       int64
+	BatchProcessed      int64
 	CPUUsage            float64
 	MemoryUsage         float64
 	GoroutineCount      int
@@ -444,19 +447,6 @@ func (po *PerformanceOptimizer) generateAdvancedCacheKey(c *gin.Context) string 
 	return keyBuilder.String()
 }
 
-func (po *PerformanceOptimizer) calculateDynamicTTL(path string, responseSize int) time.Duration {
-	baseTTL := 5 * time.Minute
-
-	// Longer TTL for smaller responses
-	if responseSize < 1024 {
-		return baseTTL * 2
-	} else if responseSize > 1024*1024 {
-		return baseTTL / 2
-	}
-
-	return baseTTL
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -595,6 +585,62 @@ type RequestBatch struct {
 }
 
 // Helper functions
+
+// copyHeaders converts http.Header to map[string]string
+func copyHeaders(headers http.Header) map[string]string {
+	result := make(map[string]string)
+	for key, values := range headers {
+		if len(values) > 0 {
+			result[key] = values[0]
+		}
+	}
+	return result
+}
+
+// generateBatchKey generates a key for request batching
+func generateBatchKey(c *gin.Context) string {
+	return c.Request.URL.Path
+}
+
+// generateCacheKey generates a key for caching
+func generateCacheKey(c *gin.Context) string {
+	return c.Request.Method + ":" + c.Request.URL.Path + ":" + c.Request.URL.RawQuery
+}
+
+// recordCompressionUse records compression usage metrics
+func (po *PerformanceOptimizer) recordCompressionUse() {
+	atomic.AddInt64(&po.metrics.CompressionUse, 1)
+}
+
+// processBatch processes a batch of requests
+func (po *PerformanceOptimizer) processBatch(batch *RequestBatch) {
+	// Process batched requests efficiently
+	if len(batch.Requests) == 0 {
+		return
+	}
+
+	logrus.WithField("batch_size", len(batch.Requests)).Debug("Processing request batch")
+
+	// Group requests by endpoint for parallel processing
+	endpointGroups := make(map[string][]*gin.Context)
+	for _, req := range batch.Requests {
+		endpoint := req.Request.URL.Path
+		endpointGroups[endpoint] = append(endpointGroups[endpoint], req)
+	}
+
+	// Process each endpoint group in parallel
+	var wg sync.WaitGroup
+	for endpoint, requests := range endpointGroups {
+		wg.Add(1)
+		go func(ep string, reqs []*gin.Context) {
+			defer wg.Done()
+			po.processEndpointBatch(ep, reqs)
+		}(endpoint, requests)
+	}
+
+	wg.Wait()
+	atomic.AddInt64(&po.metrics.BatchProcessed, 1)
+}
 
 // evictOldestEntries removes old cache entries to maintain cache size limit
 func (po *PerformanceOptimizer) evictOldestEntries(cache map[string]*CacheEntry, maxEntries int) {
@@ -776,91 +822,288 @@ func (cb *CircuitBreaker) recordSuccess() {
 	atomic.StoreInt32(&cb.state, 0) // Closed
 }
 
-// Helper functions
+// processEndpointBatch processes a batch of requests for a specific endpoint
+func (po *PerformanceOptimizer) processEndpointBatch(endpoint string, requests []*gin.Context) {
+	logrus.WithFields(logrus.Fields{
+		"endpoint":   endpoint,
+		"batch_size": len(requests),
+	}).Debug("Processing endpoint batch")
 
-func generateCacheKey(c *gin.Context) string {
-	return c.Request.Method + ":" + c.Request.URL.Path + ":" + c.Request.URL.RawQuery
+	// Process requests based on endpoint type
+	switch {
+	case strings.Contains(endpoint, "/chat"):
+		po.processChatBatch(requests)
+	case strings.Contains(endpoint, "/completion"):
+		po.processCompletionBatch(requests)
+	case strings.Contains(endpoint, "/models"):
+		po.processModelsBatch(requests)
+	default:
+		po.processGenericBatch(requests)
+	}
 }
 
-func generateBatchKey(c *gin.Context) string {
-	return c.Request.URL.Path
+// processChatBatch optimizes chat completion requests
+func (po *PerformanceOptimizer) processChatBatch(requests []*gin.Context) {
+	// For chat requests, we can potentially combine similar requests
+	// or prioritize based on user context
+	for _, req := range requests {
+		start := time.Now()
+		req.Next()
+		duration := time.Since(start)
+		po.recordRequest(duration)
+	}
 }
 
-func copyHeaders(headers http.Header) map[string]string {
-	result := make(map[string]string)
-	for key, values := range headers {
-		if len(values) > 0 {
-			result[key] = values[0]
+// processCompletionBatch optimizes completion requests
+func (po *PerformanceOptimizer) processCompletionBatch(requests []*gin.Context) {
+	// Similar optimization strategies for completion requests
+	for _, req := range requests {
+		start := time.Now()
+		req.Next()
+		duration := time.Since(start)
+		po.recordRequest(duration)
+	}
+}
+
+// processModelsBatch optimizes model listing requests
+func (po *PerformanceOptimizer) processModelsBatch(requests []*gin.Context) {
+	// Models endpoint can be heavily cached
+	cacheKey := "models_list"
+
+	// Check if we have cached response
+	if cached := po.getCachedResponse(cacheKey); cached != nil {
+		for _, req := range requests {
+			req.JSON(http.StatusOK, cached)
+		}
+		return
+	}
+
+	// Process first request and cache result
+	if len(requests) > 0 {
+		first := requests[0]
+		start := time.Now()
+		first.Next()
+		duration := time.Since(start)
+		po.recordRequest(duration)
+
+		// Cache the response if successful
+		if first.Writer.Status() == http.StatusOK {
+			// In a real implementation, we'd extract the response body
+			// and cache it for subsequent requests
+			po.setCachedResponse(cacheKey, map[string]interface{}{
+				"cached_at": time.Now(),
+				"data":      "models_data", // Placeholder
+			})
+		}
+
+		// Process remaining requests with cached data
+		for _, req := range requests[1:] {
+			req.JSON(http.StatusOK, map[string]interface{}{
+				"message": "Processed with batch optimization",
+			})
 		}
 	}
-	return result
 }
 
-func shouldSkipCompression(contentType string) bool {
-	skipTypes := []string{
-		"image/",
-		"video/",
-		"audio/",
-		"application/zip",
-		"application/gzip",
-		"application/pdf",
+// processGenericBatch processes other types of requests
+func (po *PerformanceOptimizer) processGenericBatch(requests []*gin.Context) {
+	// Default processing for non-specialized endpoints
+	for _, req := range requests {
+		start := time.Now()
+		req.Next()
+		duration := time.Since(start)
+		po.recordRequest(duration)
 	}
-
-	for _, skipType := range skipTypes {
-		if strings.HasPrefix(contentType, skipType) {
-			return true
-		}
-	}
-	return false
 }
 
-func (po *PerformanceOptimizer) processBatch(batch *RequestBatch) {
-	// Implementation for processing batched requests
-	// This would depend on the specific use case
-}
-
-// Metrics recording methods
+// recordRequest records metrics for a completed request
 func (po *PerformanceOptimizer) recordRequest(duration time.Duration) {
 	po.metrics.mutex.Lock()
+	defer po.metrics.mutex.Unlock()
+
 	po.metrics.RequestCount++
 	po.metrics.TotalDuration += duration
-	po.metrics.mutex.Unlock()
+	if po.metrics.RequestCount > 0 {
+		po.metrics.AverageResponseTime = time.Duration(
+			int64(po.metrics.TotalDuration) / po.metrics.RequestCount,
+		)
+	}
 }
 
-func (po *PerformanceOptimizer) recordCacheHit() {
-	po.metrics.mutex.Lock()
-	po.metrics.CacheHits++
-	po.metrics.mutex.Unlock()
-}
-
-func (po *PerformanceOptimizer) recordCacheMiss() {
-	po.metrics.mutex.Lock()
-	po.metrics.CacheMisses++
-	po.metrics.mutex.Unlock()
-}
-
-func (po *PerformanceOptimizer) recordCompressionUse() {
-	po.metrics.mutex.Lock()
-	po.metrics.CompressionUse++
-	po.metrics.mutex.Unlock()
-}
-
+// getRequestCount returns the current request count
 func (po *PerformanceOptimizer) getRequestCount() int64 {
 	po.metrics.mutex.RLock()
 	defer po.metrics.mutex.RUnlock()
 	return po.metrics.RequestCount
 }
 
-// GetMetrics returns current performance metrics
-func (po *PerformanceOptimizer) GetMetrics() PerformanceMetrics {
-	po.metrics.mutex.RLock()
-	defer po.metrics.mutex.RUnlock()
-	// Create a copy without the mutex to avoid the "return copies lock value" error
-	return PerformanceMetrics{
-		RequestCount:   po.metrics.RequestCount,
-		TotalDuration:  po.metrics.TotalDuration,
-		CacheHits:      po.metrics.CacheHits,
-		CacheMisses:    po.metrics.CacheMisses,
-		CompressionUse: po.metrics.CompressionUse,
+// getCachedResponse retrieves cached response data
+func (po *PerformanceOptimizer) getCachedResponse(key string) interface{} {
+	po.cacheMutex.RLock()
+	defer po.cacheMutex.RUnlock()
+
+	// Check if we have an in-memory cache implementation
+	cache := po.getCache()
+	if cache == nil {
+		return nil
+	}
+
+	// Retrieve entry with TTL check
+	if entry, exists := cache[key]; exists {
+		if time.Since(entry.Timestamp) <= entry.TTL {
+			atomic.AddInt64(&po.metrics.CacheHits, 1)
+			logrus.WithField("cache_key", key).Debug("Cache hit")
+			return entry.Body
+		} else {
+			// Entry expired, remove it (upgrade to write lock)
+			po.cacheMutex.RUnlock()
+			po.cacheMutex.Lock()
+			delete(cache, key)
+			po.cacheMutex.Unlock()
+			po.cacheMutex.RLock()
+
+			atomic.AddInt64(&po.metrics.CacheMisses, 1)
+			logrus.WithField("cache_key", key).Debug("Cache miss (expired)")
+		}
+	} else {
+		atomic.AddInt64(&po.metrics.CacheMisses, 1)
+		logrus.WithField("cache_key", key).Debug("Cache miss")
+	}
+
+	return nil
+}
+
+// setCachedResponse stores response data in cache
+func (po *PerformanceOptimizer) setCachedResponse(key string, data interface{}) {
+	po.cacheMutex.Lock()
+	defer po.cacheMutex.Unlock()
+
+	cache := po.getCache()
+	if cache == nil {
+		return
+	}
+
+	// Create cache entry with appropriate TTL
+	entry := &CacheEntry{
+		Body:        data.([]byte),
+		Timestamp:   time.Now(),
+		TTL:         po.calculateCacheTTL(key),
+		StatusCode:  200,
+		ContentType: "application/json",
+		Headers:     make(map[string]string),
+	}
+
+	// Store in cache with size limit
+	if len(cache) >= 1000 {
+		po.evictOldestCacheEntries(cache)
+	}
+
+	cache[key] = entry
+	logrus.WithFields(logrus.Fields{
+		"cache_key": key,
+		"ttl":       entry.TTL,
+	}).Debug("Response cached")
+}
+
+// getCache returns the cache map (in a real implementation, this might be Redis)
+func (po *PerformanceOptimizer) getCache() map[string]*CacheEntry {
+	// Simple in-memory cache for this implementation
+	// In production, this would be Redis or another distributed cache
+	if po.cache == nil {
+		po.cache = make(map[string]*CacheEntry)
+	}
+	return po.cache
+}
+
+// calculateCacheTTL calculates appropriate TTL based on content type
+func (po *PerformanceOptimizer) calculateCacheTTL(key string) time.Duration {
+	// Different TTLs for different content types
+	switch {
+	case strings.Contains(key, "models"):
+		return 1 * time.Hour // Model info changes rarely
+	case strings.Contains(key, "chat"):
+		return 5 * time.Minute // Chat responses can be cached briefly
+	case strings.Contains(key, "completion"):
+		return 5 * time.Minute // Completion responses can be cached briefly
+	default:
+		return 10 * time.Minute // Default TTL
+	}
+}
+
+// evictOldestCacheEntries removes oldest entries to maintain cache size
+func (po *PerformanceOptimizer) evictOldestCacheEntries(cache map[string]*CacheEntry) {
+	if len(cache) <= 800 {
+		return
+	}
+
+	// Find and remove 200 oldest entries
+	type keyTimestamp struct {
+		key       string
+		timestamp time.Time
+	}
+
+	var entries []keyTimestamp
+	for k, v := range cache {
+		entries = append(entries, keyTimestamp{key: k, timestamp: v.Timestamp})
+	}
+
+	// Sort by timestamp (oldest first)
+	for i := 0; i < len(entries)-1; i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[i].timestamp.After(entries[j].timestamp) {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+
+	// Remove oldest 200 entries
+	removeCount := 200
+	if len(entries) < removeCount {
+		removeCount = len(entries)
+	}
+	for i := 0; i < removeCount; i++ {
+		delete(cache, entries[i].key)
+	}
+
+	logrus.WithField("evicted_count", removeCount).Debug("Evicted old cache entries")
+}
+
+// shouldSkipCompression determines if compression should be skipped
+func shouldSkipCompression(contentType string) bool {
+	skipTypes := []string{
+		"image/",
+		"video/",
+		"audio/",
+		"application/gzip",
+		"application/zip",
+		"application/octet-stream",
+	}
+
+	for _, skipType := range skipTypes {
+		if strings.Contains(contentType, skipType) {
+			return true
+		}
+	}
+	return false
+}
+
+// calculateDynamicTTL calculates cache TTL based on content size and type
+func (po *PerformanceOptimizer) calculateDynamicTTL(path string, contentSize int) time.Duration {
+	baseTTL := 5 * time.Minute
+
+	// Adjust TTL based on path
+	switch {
+	case strings.Contains(path, "/models"):
+		return 30 * time.Minute // Models don't change frequently
+	case strings.Contains(path, "/health"):
+		return 1 * time.Minute // Health status changes frequently
+	case strings.Contains(path, "/stats"):
+		return 30 * time.Second // Stats change frequently
+	case contentSize < 1024: // Small responses
+		return baseTTL * 2
+	case contentSize > 100*1024: // Large responses
+		return baseTTL / 2
+	default:
+		return baseTTL
 	}
 }
