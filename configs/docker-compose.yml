@@ -1,0 +1,160 @@
+# AI Gateway - 统一容器编排配置
+# 支持多环境切换，简洁高效
+
+services:
+  # 后端服务
+  backend:
+    container_name: aigateway-backend
+    build:
+      context: ..
+      dockerfile: configs/docker/Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      - ENV=${ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - CONSUL_ADDR=consul:8500
+    depends_on:
+      - postgres
+      - redis
+      - consul
+    networks:
+      - aigateway
+    volumes:
+      - ../:/app:cached
+    restart: unless-stopped
+
+  # Python 模型服务
+  python-models:
+    container_name: aigateway-python
+    build:
+      context: ..
+      dockerfile: configs/docker/Dockerfile.python
+    ports:
+      - "${PYTHON_PORT:-8081}:8081"
+    environment:
+      - ENV=${ENV:-development}
+    networks:
+      - aigateway
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    container_name: aigateway-frontend
+    build:
+      context: ../frontend
+      dockerfile: ../configs/docker/Dockerfile.frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${ENV:-development}
+      - VITE_API_URL=http://backend:8080
+    depends_on:
+      - backend
+    networks:
+      - aigateway
+    restart: unless-stopped
+
+  # 数据库
+  postgres:
+    container_name: aigateway-postgres
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=${DB_NAME:-aigateway}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - aigateway
+    restart: unless-stopped
+
+  # 缓存
+  redis:
+    container_name: aigateway-redis
+    image: redis:7-alpine
+    command: redis-server /etc/redis/redis.conf
+    volumes:
+      - redis_data:/data
+      - ./services/redis/redis.conf:/etc/redis/redis.conf
+    networks:
+      - aigateway
+    restart: unless-stopped
+
+  # 服务发现
+  consul:
+    container_name: aigateway-consul
+    image: consul:1.15
+    command: consul agent -config-file=/etc/consul/config.json
+    volumes:
+      - ./services/consul/config.json:/etc/consul/config.json
+      - consul_data:/consul/data
+    ports:
+      - "8500:8500"
+    networks:
+      - aigateway
+    restart: unless-stopped
+
+  # 反向代理 (仅生产环境)
+  nginx:
+    container_name: aigateway-nginx
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./services/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./services/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - aigateway
+    restart: unless-stopped
+    profiles:
+      - production
+
+  # 监控 (可选)
+  prometheus:
+    container_name: aigateway-prometheus
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./services/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - aigateway
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  grafana:
+    container_name: aigateway-grafana
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./services/grafana/grafana.ini:/etc/grafana/grafana.ini
+    networks:
+      - aigateway
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  consul_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  aigateway:
+    driver: bridge

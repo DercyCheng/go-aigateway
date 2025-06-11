@@ -1,0 +1,137 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aigateway-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - aigateway.yourdomain.com
+      secretName: aigateway-tls
+  rules:
+    - host: aigateway.yourdomain.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: aigateway-backend-service
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aigateway-frontend-service
+                port:
+                  number: 3000
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+data:
+  init.sql: |
+    -- AI Gateway 数据库初始化脚本
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        key_name VARCHAR(100) NOT NULL,
+        key_hash VARCHAR(255) NOT NULL,
+        permissions TEXT[],
+        is_active BOOLEAN DEFAULT true,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    port 6379
+    protected-mode no
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    save 900 1
+    save 300 10
+    save 60 10000
+    loglevel notice
+    tcp-keepalive 300
+    timeout 0
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-config
+data:
+  config.json: |
+    {
+      "datacenter": "dc1",
+      "data_dir": "/consul/data",
+      "log_level": "INFO",
+      "server": true,
+      "bootstrap": true,
+      "ui_config": {
+        "enabled": true
+      },
+      "connect": {
+        "enabled": true
+      },
+      "client_addr": "0.0.0.0",
+      "bind_addr": "0.0.0.0"
+    }
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+type: Opaque
+data:
+  password: eW91cl9zZWN1cmVfcGFzc3dvcmQ= # base64 encoded "your_secure_password"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: consul-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
