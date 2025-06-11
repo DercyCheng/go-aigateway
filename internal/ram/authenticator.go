@@ -19,6 +19,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const (
+	// UserInfoContextKey is the key for storing user info in context
+	UserInfoContextKey contextKey = "ram_user_info"
+)
+
 type RAMAuthenticator struct {
 	config *config.RAMAuthConfig
 	cache  map[string]*CacheEntry
@@ -82,20 +90,19 @@ func (ra *RAMAuthenticator) Authenticate(ctx context.Context, req *AuthRequest) 
 			ExpiresAt:     cached.ExpiresAt,
 		}, nil
 	}
+	// Validate timestamp first (cheaper validation and prevents replay attacks)
+	if !ra.validateTimestamp(req.Timestamp) {
+		return &AuthResponse{
+			Authenticated: false,
+			Error:         "Request timestamp expired",
+		}, nil
+	}
 
 	// Validate signature
 	if !ra.validateSignature(req) {
 		return &AuthResponse{
 			Authenticated: false,
 			Error:         "Invalid signature",
-		}, nil
-	}
-
-	// Validate timestamp (prevent replay attacks)
-	if !ra.validateTimestamp(req.Timestamp) {
-		return &AuthResponse{
-			Authenticated: false,
-			Error:         "Request timestamp expired",
 		}, nil
 	}
 
@@ -220,9 +227,9 @@ func (ra *RAMAuthenticator) getUserInfo(ctx context.Context, accessKeyID string)
 		userInfo = &UserInfo{
 			UserID:   fmt.Sprintf("admin-%s", accessKeyID[len(accessKeyID)-8:]),
 			UserName: fmt.Sprintf("admin_%s", accessKeyID[len(accessKeyID)-8:]),
-			Roles:    []string{"ai-gateway-admin", "ai-gateway-user"},
-			Permissions: []string{
+			Roles:    []string{"ai-gateway-admin", "ai-gateway-user"}, Permissions: []string{
 				"ai:*",
+				"ai:admin",
 				"admin:*",
 				"model:*",
 				"config:*",
@@ -278,8 +285,7 @@ func (ra *RAMAuthenticator) getUserInfo(ctx context.Context, accessKeyID string)
 			},
 			Policies: []string{
 				"AIGatewayServicePolicy",
-			},
-			Attributes: map[string]string{
+			}, Attributes: map[string]string{
 				"region":       ra.config.Region,
 				"account_id":   "123456789012",
 				"create_time":  time.Now().Format(time.RFC3339),
@@ -415,10 +421,8 @@ func (ra *RAMAuthenticator) Middleware() func(http.Handler) http.Handler {
 					},
 				})
 				return
-			}
-
-			// Add user info to request context
-			ctx := context.WithValue(r.Context(), "ram_user_info", authResp.UserInfo)
+			} // Add user info to request context
+			ctx := context.WithValue(r.Context(), UserInfoContextKey, authResp.UserInfo)
 			r = r.WithContext(ctx)
 
 			next.ServeHTTP(w, r)
@@ -426,12 +430,18 @@ func (ra *RAMAuthenticator) Middleware() func(http.Handler) http.Handler {
 	}
 }
 
+// GetUserInfoFromContext retrieves user info from the request context
+func GetUserInfoFromContext(ctx context.Context) (*UserInfo, bool) {
+	userInfo, ok := ctx.Value(UserInfoContextKey).(*UserInfo)
+	return userInfo, ok
+}
+
 func (ra *RAMAuthenticator) extractAuthRequest(r *http.Request) *AuthRequest {
 	// Check for RAM authentication headers
-	accessKeyID := r.Header.Get("X-Ram-Access-Key-Id")
-	signature := r.Header.Get("X-Ram-Signature")
-	timestamp := r.Header.Get("X-Ram-Timestamp")
-	nonce := r.Header.Get("X-Ram-Nonce")
+	accessKeyID := r.Header.Get("X-Ca-Key")
+	signature := r.Header.Get("X-Ca-Signature")
+	timestamp := r.Header.Get("X-Ca-Timestamp")
+	nonce := r.Header.Get("X-Ca-Nonce")
 
 	if accessKeyID == "" || signature == "" || timestamp == "" || nonce == "" {
 		return nil

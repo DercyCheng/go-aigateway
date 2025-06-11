@@ -1,12 +1,9 @@
-# AI Gateway - 统一容器编排配置
-# 支持多环境切换，简洁高效
-
 services:
   # 后端服务
   backend:
     container_name: aigateway-backend
     build:
-      context: ..
+      context: .
       dockerfile: configs/docker/Dockerfile
     ports:
       - "${BACKEND_PORT:-8080}:8080"
@@ -23,14 +20,14 @@ services:
     networks:
       - aigateway
     volumes:
-      - ../:/app:cached
+      - ./:/app:cached
     restart: unless-stopped
 
   # Python 模型服务
   python-models:
     container_name: aigateway-python
     build:
-      context: ..
+      context: .
       dockerfile: configs/docker/Dockerfile.python
     ports:
       - "${PYTHON_PORT:-8081}:8081"
@@ -44,7 +41,7 @@ services:
   frontend:
     container_name: aigateway-frontend
     build:
-      context: ../frontend
+      context: ./frontend
       dockerfile: ../configs/docker/Dockerfile.frontend
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
@@ -67,7 +64,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./services/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./configs/services/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - aigateway
     restart: unless-stopped
@@ -79,7 +76,7 @@ services:
     command: redis-server /etc/redis/redis.conf
     volumes:
       - redis_data:/data
-      - ./services/redis/redis.conf:/etc/redis/redis.conf
+      - ./configs/services/redis/redis.conf:/etc/redis/redis.conf
     networks:
       - aigateway
     restart: unless-stopped
@@ -90,7 +87,7 @@ services:
     image: consul:1.15
     command: consul agent -config-file=/etc/consul/config.json
     volumes:
-      - ./services/consul/config.json:/etc/consul/config.json
+      - ./configs/services/consul/config.json:/etc/consul/config.json
       - consul_data:/consul/data
     ports:
       - "8500:8500"
@@ -106,8 +103,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./services/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./services/nginx/ssl:/etc/nginx/ssl
+      - ./configs/services/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./configs/services/nginx/ssl:/etc/nginx/ssl
     depends_on:
       - backend
       - frontend
@@ -124,7 +121,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./services/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./configs/services/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     networks:
       - aigateway
@@ -141,7 +138,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./services/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./configs/services/grafana/grafana.ini:/etc/grafana/grafana.ini
     networks:
       - aigateway
     restart: unless-stopped

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go-aigateway/internal/config"
@@ -164,12 +165,25 @@ func TestAPIKeyValidation(t *testing.T) {
 
 			cfg := &config.Config{
 				GatewayKeys: []string{"valid-test-key"},
-			}
-
-			// Add middleware
+			} // Add middleware
 			router.Use(func(c *gin.Context) {
 				// Mock API key validation
 				authHeader := c.GetHeader("Authorization")
+
+				// Check if Authorization header is missing
+				if authHeader == "" {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+					c.Abort()
+					return
+				}
+
+				// Check if Authorization header has proper Bearer format
+				if !strings.HasPrefix(authHeader, "Bearer ") {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+					c.Abort()
+					return
+				}
+
 				token := authHeader[7:] // Remove "Bearer "
 
 				valid := false

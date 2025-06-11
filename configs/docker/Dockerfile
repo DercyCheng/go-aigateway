@@ -1,13 +1,17 @@
 # AI Gateway 后端 Dockerfile
 # 多阶段构建，优化镜像大小
 
-FROM golang:1.21-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
 
 # 安装必要工具
 RUN apk add --no-cache git
+
+# 设置 Go 环境变量，使用不同的代理或禁用代理
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=off
 
 # 复制依赖文件
 COPY go.mod go.sum ./

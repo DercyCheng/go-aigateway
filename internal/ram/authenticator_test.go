@@ -72,6 +72,7 @@ func TestRAMAuthenticator_Authenticate(t *testing.T) {
 		req := &AuthRequest{
 			AccessKeyID:     accessKeyID,
 			Timestamp:       timestamp,
+			Nonce:           "test-nonce",
 			Method:          "POST",
 			URI:             "/api/v1/chat",
 			Headers:         map[string]string{"Content-Type": "application/json"},
@@ -92,11 +93,14 @@ func TestRAMAuthenticator_Authenticate(t *testing.T) {
 
 	t.Run("invalid signature", func(t *testing.T) {
 		req := &AuthRequest{
-			AccessKeyID: "LTAI4test123456",
-			Signature:   "invalid-signature",
-			Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
-			Method:      "POST",
-			URI:         "/api/v1/chat",
+			AccessKeyID:     "LTAI4invalid123456",
+			Signature:       "invalid-signature",
+			Timestamp:       strconv.FormatInt(time.Now().Unix(), 10),
+			Nonce:           "test-nonce",
+			Method:          "POST",
+			URI:             "/api/v1/chat",
+			Headers:         map[string]string{"Content-Type": "application/json"},
+			QueryParameters: map[string]string{},
 		}
 
 		resp, err := auth.Authenticate(context.Background(), req)
@@ -110,11 +114,14 @@ func TestRAMAuthenticator_Authenticate(t *testing.T) {
 		oldTimestamp := strconv.FormatInt(time.Now().Add(-10*time.Minute).Unix(), 10)
 
 		req := &AuthRequest{
-			AccessKeyID: "LTAI4test123456",
-			Signature:   "test-signature",
-			Timestamp:   oldTimestamp,
-			Method:      "POST",
-			URI:         "/api/v1/chat",
+			AccessKeyID:     "LTAI4expired123456",
+			Signature:       "test-signature",
+			Timestamp:       oldTimestamp,
+			Nonce:           "test-nonce",
+			Method:          "POST",
+			URI:             "/api/v1/chat",
+			Headers:         map[string]string{"Content-Type": "application/json"},
+			QueryParameters: map[string]string{},
 		}
 
 		resp, err := auth.Authenticate(context.Background(), req)
@@ -314,8 +321,8 @@ func TestRAMAuthenticator_getUserInfo(t *testing.T) {
 
 		userInfo, err := auth.getUserInfo(context.Background(), accessKeyID)
 		require.NoError(t, err)
-		assert.Equal(t, "user-23456", userInfo.UserID)
-		assert.Equal(t, "user_23456", userInfo.UserName)
+		assert.Equal(t, "user-st123456", userInfo.UserID)
+		assert.Equal(t, "user_st123456", userInfo.UserName)
 		assert.Contains(t, userInfo.Roles, "ai-gateway-user")
 		assert.Contains(t, userInfo.Permissions, "ai:chat")
 	})

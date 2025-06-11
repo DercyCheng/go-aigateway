@@ -9,6 +9,11 @@ import CertificateManagement from './pages/CertificateManagement'
 import LocalModelManagement from './pages/LocalModelManagement'
 import './App.css'
 
+/**
+ * Main application component that sets up the routing structure.
+ * Defines all the route paths and their corresponding components.
+ * Wrapped with Layout component for consistent UI structure.
+ */
 function App() {
   return (
     <Router>

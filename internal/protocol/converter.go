@@ -412,7 +412,6 @@ func (pc *ProtocolConverter) parseGRPCServiceMethod(endpoint, httpMethod string)
 func (pc *ProtocolConverter) invokeGRPCMethod(ctx context.Context, conn *grpc.ClientConn, servicePath, methodName string, requestData []byte) (interface{}, error) {
 	// This is a simplified implementation of dynamic gRPC invocation
 	// In a production environment, you would use reflection or generated stubs
-
 	// Create a generic request message
 	var request map[string]interface{}
 	if len(requestData) > 0 {
