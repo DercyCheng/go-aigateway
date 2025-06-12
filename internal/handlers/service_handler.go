@@ -163,6 +163,78 @@ func (h *ServiceHandler) GetServices(c *gin.Context) {
 	})
 }
 
+// GetServiceHealth returns the health status of a specific service
+func (h *ServiceHandler) GetServiceHealth(c *gin.Context) {
+	id := c.Param("id")
+
+	for _, service := range h.services {
+		if service.ID == id {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"id":           service.ID,
+					"name":         service.Name,
+					"status":       service.Status,
+					"lastCheck":    service.LastCheck,
+					"responseTime": service.AvgResponseTime,
+					"successRate":  service.SuccessRate,
+					"endpoint":     service.Endpoint,
+					"healthChecks": []gin.H{
+						{
+							"timestamp": time.Now().Format(time.RFC3339),
+							"status":    service.Status,
+							"latency":   service.AvgResponseTime,
+						},
+					},
+				},
+			})
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{
+		"success": false,
+		"error": gin.H{
+			"code":    "NOT_FOUND",
+			"message": "Service not found",
+		},
+	})
+}
+
+// RefreshService refreshes the status of a specific service
+func (h *ServiceHandler) RefreshService(c *gin.Context) {
+	id := c.Param("id")
+
+	for i, service := range h.services {
+		if service.ID == id {
+			// Simulate a health check refresh
+			h.services[i].LastCheck = time.Now().Format("2006-01-02 15:04:05")
+			h.services[i].UpdatedAt = time.Now()
+
+			// Simulate some variation in metrics
+			if h.services[i].Status == "healthy" {
+				h.services[i].AvgResponseTime = 200.0 + float64(time.Now().UnixNano()%100)
+				h.services[i].SuccessRate = 99.5 + float64(time.Now().UnixNano()%50)/100
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    h.services[i],
+				"message": "Service refreshed successfully",
+			})
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{
+		"success": false,
+		"error": gin.H{
+			"code":    "NOT_FOUND",
+			"message": "Service not found",
+		},
+	})
+}
+
 // GetServiceSources returns all service sources
 func (h *ServiceHandler) GetServiceSources(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -417,17 +489,14 @@ func (h *ServiceHandler) ToggleRouteStatus(c *gin.Context) {
 	})
 }
 
-// Helper function to generate unique IDs
-func generateID() string {
-	return time.Now().Format("20060102150405") + "-" + string(rune(time.Now().UnixNano()%1000))
-}
-
 // RegisterServiceRoutes registers all service-related routes
 func RegisterServiceRoutes(r *gin.Engine, handler *ServiceHandler) {
 	api := r.Group("/api/v1")
 
 	// Services
 	api.GET("/monitoring/services", handler.GetServices)
+	api.GET("/monitoring/services/:id/health", handler.GetServiceHealth)
+	api.POST("/monitoring/services/:id/refresh", handler.RefreshService)
 
 	// Service Sources
 	api.GET("/service-sources", handler.GetServiceSources)

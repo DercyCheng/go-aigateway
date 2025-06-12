@@ -240,6 +240,16 @@ func main() {
 	handlers.RegisterServiceRoutes(r, serviceHandler)
 	logrus.Info("Service management API routes registered")
 
+	// Setup certificate management routes
+	certificateHandler := handlers.NewCertificateHandler()
+	handlers.RegisterCertificateRoutes(r, certificateHandler)
+	logrus.Info("Certificate management API routes registered")
+
+	// Setup domain management routes
+	domainHandler := handlers.NewDomainHandler()
+	handlers.RegisterDomainRoutes(r, domainHandler)
+	logrus.Info("Domain management API routes registered")
+
 	// Start background services
 	// Service discovery is automatically started in NewManager
 
