@@ -112,23 +112,74 @@ const validateInputImpl = {
 
     validateLength: (input: string, min: number = 0, max: number = 1000): boolean => {
         return typeof input === 'string' && input.length >= min && input.length <= max;
-    },
-
-    // Validate against common injection patterns
+    },    // Validate against common injection patterns with enhanced detection
     isSecureInput: (input: string): boolean => {
         if (typeof input !== 'string') return false;
 
         const dangerousPatterns = [
-            /<script/i,
-            /javascript:/i,
-            /vbscript:/i,
-            /on\w+\s*=/i,
-            /data:/i,
-            /eval\s*\(/i,
-            /expression\s*\(/i
+            /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+            /javascript\s*:/gi,
+            /vbscript\s*:/gi,
+            /on\w+\s*=/gi,
+            /data\s*:/gi,
+            /eval\s*\(/gi,
+            /expression\s*\(/gi,
+            /import\s*\(/gi,
+            /require\s*\(/gi,
+            /__proto__/gi,
+            /constructor/gi,
+            /prototype/gi,
+            /function\s*\(/gi,
+            /=\s*\/.*\/[gimuy]*/gi, // Regex patterns
+            /\${.*}/gi, // Template literals
+            /<iframe/gi,
+            /<object/gi,
+            /<embed/gi,
+            /<link/gi,
+            /<meta/gi,
+            /<style/gi,
+            /<!--.*-->/gi,
+            /\/\*.*\*\//gi,
         ];
 
         return !dangerousPatterns.some(pattern => pattern.test(input));
+    },
+
+    // Enhanced XSS detection
+    hasXSSPattern: (input: string): boolean => {
+        if (typeof input !== 'string') return false;
+
+        const xssPatterns = [
+            /&lt;script/gi,
+            /&gt;/gi,
+            /&quot;/gi,
+            /&#x27;/gi,
+            /&#x2F;/gi,
+            /&amp;/gi,
+            /%3Cscript/gi,
+            /%3C%2Fscript%3E/gi,
+            /\+ADw-script/gi,
+            /\+ADw-/gi,
+        ];
+
+        return xssPatterns.some(pattern => pattern.test(input));
+    },
+
+    // SQL injection detection
+    hasSQLInjection: (input: string): boolean => {
+        if (typeof input !== 'string') return false;
+
+        const sqlPatterns = [
+            /(\b(select|insert|update|delete|drop|create|alter|exec|execute|union|declare)\b)/gi,
+            /(--|\/\*|\*\/|;|'|"|`)/gi,
+            /(\bor\b|\band\b).*?=/gi,
+            /1\s*=\s*1/gi,
+            /'[^']*'/gi,
+            /"\s*or\s*"/gi,
+            /'\s*or\s*'/gi,
+        ];
+
+        return sqlPatterns.some(pattern => pattern.test(input));
     }
 };
 
@@ -138,9 +189,18 @@ export { validateInputImpl as validateInput };
 const secureStorageImpl = {
     setItem: (key: string, value: any): void => {
         try {
-            // Encrypt sensitive data before storing (in a real app, use proper encryption)
+            // Simple encoding for non-sensitive data
+            // In production, use proper encryption for sensitive data
             const data = typeof value === 'string' ? value : JSON.stringify(value);
-            const encoded = btoa(data); // Base64 encoding (not secure, just obfuscation)
+
+            // Add timestamp and basic integrity check
+            const payload = {
+                data,
+                timestamp: Date.now(),
+                checksum: btoa(data).slice(0, 8) // Simple integrity check
+            };
+
+            const encoded = btoa(JSON.stringify(payload));
             localStorage.setItem(`sec_${key}`, encoded);
         } catch (error) {
             console.error('Failed to store data securely:', error);
@@ -152,11 +212,26 @@ const secureStorageImpl = {
             const encoded = localStorage.getItem(`sec_${key}`);
             if (!encoded) return null;
 
-            const decoded = atob(encoded);
+            const payload = JSON.parse(atob(encoded));
+
+            // Check timestamp - expire after 24 hours
+            if (payload.timestamp && (Date.now() - payload.timestamp > 24 * 60 * 60 * 1000)) {
+                localStorage.removeItem(`sec_${key}`);
+                return null;
+            }
+
+            // Verify basic integrity
+            const expectedChecksum = btoa(payload.data).slice(0, 8);
+            if (payload.checksum !== expectedChecksum) {
+                console.warn('Data integrity check failed for key:', key);
+                localStorage.removeItem(`sec_${key}`);
+                return null;
+            }
+
             try {
-                return JSON.parse(decoded);
+                return JSON.parse(payload.data);
             } catch {
-                return decoded;
+                return payload.data;
             }
         } catch (error) {
             console.error('Failed to retrieve data securely:', error);

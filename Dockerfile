@@ -32,8 +32,12 @@ RUN go mod download && go mod verify
 # 复制源代码
 COPY . .
 
-# 构建应用
-RUN go build -a -installsuffix cgo -ldflags="-w -s" -o ai-gateway .
+# 构建应用 - 增强安全性
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s -X main.version=$(date +%Y%m%d-%H%M%S) -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -trimpath \
+    -o ai-gateway .
 
 # =================================
 # 开发阶段 - 包含开发工具

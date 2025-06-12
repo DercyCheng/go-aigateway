@@ -33,9 +33,13 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		logrus.Info("No .env file found, using system environment variables")
 	}
-
 	// Initialize configuration
 	cfg := config.New()
+
+	// Validate configuration
+	if err := cfg.ValidateConfig(); err != nil {
+		logrus.WithError(err).Fatal("Configuration validation failed")
+	}
 
 	// Setup logging
 	setupLogging(cfg)

@@ -184,22 +184,43 @@ func (sm *SecurityMiddleware) Handler() gin.HandlerFunc {
 	return sm.Middleware()
 }
 
-// SecurityHeaders middleware adds security headers
+// SecurityHeaders middleware adds comprehensive security headers
 func SecurityHeaders(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Add security headers
+		// Basic security headers
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("X-Download-Options", "noopen")
+		c.Header("X-Permitted-Cross-Domain-Policies", "none")
 
+		// HSTS (HTTP Strict Transport Security)
 		if cfg.HSTSMaxAge > 0 {
-			c.Header("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains", cfg.HSTSMaxAge))
+			c.Header("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains; preload", cfg.HSTSMaxAge))
 		}
 
-		// Content Security Policy
-		csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
-		c.Header("Content-Security-Policy", csp)
+		// Enhanced Content Security Policy
+		csp := []string{
+			"default-src 'self'",
+			"script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Consider removing unsafe-* in production
+			"style-src 'self' 'unsafe-inline'",
+			"img-src 'self' data: https:",
+			"font-src 'self'",
+			"connect-src 'self'",
+			"media-src 'none'",
+			"object-src 'none'",
+			"child-src 'none'",
+			"frame-ancestors 'none'",
+			"form-action 'self'",
+			"base-uri 'self'",
+			"manifest-src 'self'",
+		}
+		c.Header("Content-Security-Policy", strings.Join(csp, "; "))
+
+		// Additional security headers
+		c.Header("Feature-Policy", "accelerometer 'none'; camera 'none'; geolocation 'none'; gyroscope 'none'; magnetometer 'none'; microphone 'none'; payment 'none'; usb 'none'")
+		c.Header("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 
 		c.Next()
 	}
@@ -271,7 +292,7 @@ func (is *InputSanitizer) ValidateEmail(email string) error {
 	return nil
 }
 
-// ValidateAPIKey validates API key format and strength
+// ValidateAPIKey validates API key format and strength with enhanced security
 func (is *InputSanitizer) ValidateAPIKey(apiKey string) error {
 	if len(apiKey) < 32 {
 		return errors.NewWithDetails(errors.ErrCodeValidation, "API key too short", "minimum 32 characters required")
@@ -281,14 +302,94 @@ func (is *InputSanitizer) ValidateAPIKey(apiKey string) error {
 		return errors.NewWithDetails(errors.ErrCodeValidation, "API key too long", "maximum 512 characters allowed")
 	}
 
-	// Check for common patterns that might indicate weak keys
-	if strings.Contains(strings.ToLower(apiKey), "password") ||
-		strings.Contains(strings.ToLower(apiKey), "secret") ||
-		regexp.MustCompile(`^[a-zA-Z0-9]{32,}$`).MatchString(apiKey) == false {
-		return errors.NewWithDetails(errors.ErrCodeValidation, "API key format invalid", "key must contain alphanumeric characters")
+	// Check for weak patterns
+	weakPatterns := []string{
+		"password", "secret", "key", "token", "admin", "test", "demo",
+		"12345", "qwerty", "abcdef", "000000", "111111",
+	}
+
+	lowerKey := strings.ToLower(apiKey)
+	for _, pattern := range weakPatterns {
+		if strings.Contains(lowerKey, pattern) {
+			return errors.NewWithDetails(errors.ErrCodeValidation, "API key contains weak patterns", pattern)
+		}
+	}
+
+	// Check for repetitive patterns
+	if isRepetitive(apiKey) {
+		return errors.NewWithDetails(errors.ErrCodeValidation, "API key has repetitive patterns", "key lacks complexity")
+	}
+
+	// Ensure key has sufficient entropy (alphanumeric + special chars)
+	if !hasGoodEntropy(apiKey) {
+		return errors.NewWithDetails(errors.ErrCodeValidation, "API key lacks sufficient entropy", "use mix of letters, numbers, and symbols")
 	}
 
 	return nil
+}
+
+// isRepetitive checks if the API key has too many repetitive patterns
+func isRepetitive(key string) bool {
+	if len(key) < 8 {
+		return false
+	}
+
+	// Check for same character repeated
+	charCount := make(map[rune]int)
+	for _, char := range key {
+		charCount[char]++
+		if charCount[char] > len(key)/4 { // More than 25% same character
+			return true
+		}
+	}
+
+	// Check for simple patterns like "abcabc"
+	for i := 2; i <= len(key)/2; i++ {
+		pattern := key[:i]
+		if strings.Count(key, pattern) > 2 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasGoodEntropy checks if the API key has sufficient character diversity
+func hasGoodEntropy(key string) bool {
+	hasLower := false
+	hasUpper := false
+	hasDigit := false
+	hasSpecial := false
+
+	for _, char := range key {
+		switch {
+		case char >= 'a' && char <= 'z':
+			hasLower = true
+		case char >= 'A' && char <= 'Z':
+			hasUpper = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+
+	// Require at least 3 of 4 character types for good entropy
+	count := 0
+	if hasLower {
+		count++
+	}
+	if hasUpper {
+		count++
+	}
+	if hasDigit {
+		count++
+	}
+	if hasSpecial {
+		count++
+	}
+
+	return count >= 3
 }
 
 // ValidateJSONStructure validates JSON structure for common injection patterns
@@ -696,36 +797,48 @@ func extractClientIPFromRequest(req *http.Request) string {
 	return ""
 }
 
-// validateCSRFToken validates a CSRF token
+// validateCSRFToken validates a CSRF token with enhanced security
 func (sm *SecurityMiddleware) validateCSRFToken(token string) bool {
-	// For testing purposes, we'll use a simple validation
-	// In production, this should be more sophisticated
-	if len(token) < 16 {
+	if len(token) < 32 { // Increased minimum length
 		return false
 	}
 
 	// Check if token exists and is not expired
 	if expiry, exists := sm.csrfTokens[token]; exists {
 		if time.Now().Before(expiry) {
+			// Remove token after use (single-use tokens)
+			delete(sm.csrfTokens, token)
 			return true
 		}
 		// Clean up expired token
 		delete(sm.csrfTokens, token)
 	}
 
-	// For testing, accept any token that looks valid
-	return len(token) >= 16
+	return false
 }
 
-// generateCSRFToken generates a new CSRF token
+// generateCSRFToken generates a new CSRF token with enhanced security
 func (sm *SecurityMiddleware) generateCSRFToken() (string, error) {
-	token, err := GenerateSecureToken(16)
+	token, err := GenerateSecureToken(32) // Increased from 16 to 32 bytes
 	if err != nil {
 		return "", err
 	}
 
-	// Store token with expiry
-	sm.csrfTokens[token] = time.Now().Add(time.Hour)
+	// Store token with shorter expiry for better security
+	sm.csrfTokens[token] = time.Now().Add(15 * time.Minute) // Reduced from 1 hour
+
+	// Clean up old tokens periodically
+	go sm.cleanupExpiredTokens()
 
 	return token, nil
+}
+
+// cleanupExpiredTokens removes expired CSRF tokens
+func (sm *SecurityMiddleware) cleanupExpiredTokens() {
+	now := time.Now()
+	for token, expiry := range sm.csrfTokens {
+		if now.After(expiry) {
+			delete(sm.csrfTokens, token)
+		}
+	}
 }

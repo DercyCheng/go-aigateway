@@ -27,20 +27,58 @@ env-check: ## 检查环境配置
 	@if [ -f .env ]; then \
 		echo "✅ .env 文件存在"; \
 		echo "检查必要的环境变量:"; \
-		@if grep -q "your_.*_here" .env; then \
+		if grep -q "your_.*_here" .env; then \
 			echo "⚠️  发现未配置的API密钥，请编辑 .env 文件"; \
 			grep "your_.*_here" .env; \
 		else \
 			echo "✅ 环境变量配置完成"; \
-		fi \
+		fi; \
 	else \
 		echo "❌ .env 文件不存在，请运行 make env-setup"; \
 		exit 1; \
 	fi
 
 # ==========================================
-# 项目设置
+# 安全性检查和审计
 # ==========================================
+
+security-check: ## 运行安全检查
+	@echo "运行安全检查..."
+	@echo "检查环境变量安全性..."
+	@if grep -q "your_.*_here" .env 2>/dev/null; then \
+		echo "⚠️  发现未配置的默认值，请检查 .env 文件"; \
+		grep "your_.*_here" .env; \
+	else \
+		echo "✅ 环境变量检查通过"; \
+	fi
+	@echo "检查JWT密钥强度..."
+	@if [ -f .env ] && grep -q "JWT_SECRET=your_super_secret" .env; then \
+		echo "❌ JWT_SECRET 使用默认值，请更改为强密钥"; \
+		exit 1; \
+	else \
+		echo "✅ JWT密钥检查通过"; \
+	fi
+
+vulnerability-scan: ## 扫描依赖漏洞
+	@echo "扫描Go依赖漏洞..."
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		echo "安装 govulncheck: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+		govulncheck ./...; \
+	fi
+
+container-scan: ## 扫描容器镜像漏洞
+	@echo "扫描容器镜像漏洞..."
+	@if command -v trivy >/dev/null 2>&1; then \
+		trivy image aigateway:latest; \
+	else \
+		echo "请安装 Trivy: https://aquasecurity.github.io/trivy/"; \
+	fi
+
+audit: security-check vulnerability-scan ## 完整安全审计
+	@echo "✅ 安全审计完成"
 
 setup: env-setup ## 初始化项目环境
 	@echo "初始化项目环境..."

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,7 @@ type UserInfo struct {
 	ID          string            `json:"id"`
 	Username    string            `json:"username"`
 	Email       string            `json:"email"`
+	Password    string            `json:"-"` // Password hash, never returned in JSON
 	Roles       []string          `json:"roles"`
 	Permissions []string          `json:"permissions"`
 	Active      bool              `json:"active"`
@@ -409,22 +411,38 @@ func (la *LocalAuthenticator) AuthenticateUser(username, password string) (*User
 	la.mutex.RLock()
 	defer la.mutex.RUnlock()
 
-	// For now, we'll use simple hardcoded authentication
-	// In a real implementation, you would hash and compare passwords
+	// Find user by username
 	var user *UserInfo
 	for _, u := range la.users {
 		if u.Username == username && u.Active {
-			// Simple password check - in production, use proper password hashing
-			if (username == "admin" && password == "admin123") ||
-				(username == "apiuser" && password == "api123") {
-				user = u
-				break
-			}
+			user = u
+			break
 		}
 	}
 
 	if user == nil {
 		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	// Use secure password verification
+	hasher := NewPasswordHasher()
+
+	// If no password hash is stored, check environment variable for development
+	if user.Password == "" {
+		expectedPassword := os.Getenv(fmt.Sprintf("USER_%s_PASSWORD", strings.ToUpper(username)))
+		if expectedPassword == "" {
+			logrus.Warn("No password configured for user: " + username)
+			return nil, fmt.Errorf("invalid credentials")
+		}
+		// For environment variables, do simple comparison (should be temporary)
+		if expectedPassword != password {
+			return nil, fmt.Errorf("invalid credentials")
+		}
+	} else {
+		// Use stored hashed password
+		if !hasher.VerifyPassword(user.Password, password) {
+			return nil, fmt.Errorf("invalid credentials")
+		}
 	}
 
 	return user, nil

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -269,6 +270,37 @@ func New() *Config {
 			},
 		},
 	}
+}
+
+// ValidateConfig validates configuration parameters
+func (c *Config) ValidateConfig() error {
+	var errors []string
+
+	// Validate JWT secret
+	if c.Security.JWTSecret == "" || c.Security.JWTSecret == "your_super_secret_jwt_key_change_in_production_2024" {
+		errors = append(errors, "JWT_SECRET must be set to a secure value in production")
+	}
+
+	// Validate port
+	if c.Port == "" {
+		errors = append(errors, "PORT must be specified")
+	}
+
+	// Validate rate limits
+	if c.RateLimit <= 0 {
+		errors = append(errors, "RATE_LIMIT must be positive")
+	}
+
+	// Validate Redis configuration if enabled
+	if c.Redis.Enabled && c.Redis.Addr == "" {
+		errors = append(errors, "REDIS_ADDR must be specified when Redis is enabled")
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("configuration validation failed: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
 }
 
 func getEnv(key, defaultValue string) string {
