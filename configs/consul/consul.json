@@ -1,0 +1,41 @@
+{
+    "datacenter": "dc1",
+    "data_dir": "/consul/data",
+    "log_level": "INFO",
+    "node_name": "consul-dev",
+    "bind_addr": "0.0.0.0",
+    "client_addr": "0.0.0.0",
+    "retry_join": [
+        "consul"
+    ],
+    "ui": true,
+    "connect": {
+        "enabled": true
+    },
+    "ports": {
+        "grpc": 8502
+    },
+    "acl": {
+        "enabled": false,
+        "default_policy": "allow",
+        "enable_token_persistence": true
+    },
+    "services": [
+        {
+            "name": "ai-gateway-backend",
+            "port": 8080,
+            "check": {
+                "http": "http://backend:8080/health",
+                "interval": "10s"
+            }
+        },
+        {
+            "name": "python-models",
+            "port": 5000,
+            "check": {
+                "http": "http://python-models:5000/health",
+                "interval": "15s"
+            }
+        }
+    ]
+}

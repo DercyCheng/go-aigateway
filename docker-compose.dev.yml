@@ -1,0 +1,376 @@
+# AI Gateway 开发环境 Docker Compose 配置
+# 针对中国内地环境优化，包含完整的基础设施服务
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # 基础设施服务
+  # ==========================================
+  
+  # Redis 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: aigateway-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: aigateway-postgres-dev
+    environment:
+      POSTGRES_DB: aigateway_dev
+      POSTGRES_USER: aigateway
+      POSTGRES_PASSWORD: dev_password_2024
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aigateway -d aigateway_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # Consul 服务发现
+  consul:
+    image: consul:1.16
+    container_name: aigateway-consul-dev
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    volumes:
+      - consul_data:/consul/data
+      - ./configs/consul:/consul/config:ro
+    command: >
+      consul agent 
+      -server 
+      -bootstrap-expect=1 
+      -ui 
+      -bind=0.0.0.0 
+      -client=0.0.0.0 
+      -datacenter=dc1
+      -config-dir=/consul/config
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aigateway-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aigateway-grafana-dev
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin_dev_2024
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - aigateway-network
+
+  # Node Exporter 系统监控
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: aigateway-node-exporter-dev
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # cAdvisor 容器监控
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: aigateway-cadvisor-dev
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # ==========================================
+  # 应用服务
+  # ==========================================
+
+  # Go 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: aigateway-backend-dev
+    ports:
+      - "8080:8080"
+    environment:
+      # 数据库配置
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: aigateway_dev
+      DB_USER: aigateway
+      DB_PASSWORD: dev_password_2024
+      
+      # Redis 配置
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      
+      # 服务发现配置
+      SERVICE_DISCOVERY_ENABLED: "true"
+      SERVICE_DISCOVERY_TYPE: consul
+      CONSUL_ADDR: consul:8500
+      
+      # 监控配置
+      PROMETHEUS_ENABLED: "true"
+      METRICS_PORT: 9091
+      
+      # 开发环境配置
+      GO_ENV: development
+      LOG_LEVEL: debug
+      
+      # JWT 配置
+      JWT_SECRET: dev_jwt_secret_key_2024
+      JWT_EXPIRY: 24h
+      
+      # CORS 配置
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:80"
+      
+      # 性能配置
+      CACHE_ENABLED: "true"
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_REQUESTS_PER_MINUTE: 1000
+      
+      # 第三方AI服务配置
+      AI_PROVIDERS_CONFIG: /app/configs/ai-providers.yml
+      
+      # 通义千问配置
+      TONGYI_API_KEY: "${TONGYI_API_KEY:-your_tongyi_api_key_here}"
+      
+      # OpenAI配置
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-your_openai_api_key_here}"
+      OPENAI_ORG_ID: "${OPENAI_ORG_ID:-}"
+      
+      # 百度文心一言配置
+      WENXIN_API_KEY: "${WENXIN_API_KEY:-your_wenxin_api_key_here}"
+      WENXIN_SECRET_KEY: "${WENXIN_SECRET_KEY:-your_wenxin_secret_key_here}"
+      
+      # 智谱AI配置
+      ZHIPU_API_KEY: "${ZHIPU_API_KEY:-your_zhipu_api_key_here}"
+      
+      # 腾讯混元配置
+      HUNYUAN_SECRET_ID: "${HUNYUAN_SECRET_ID:-your_hunyuan_secret_id_here}"
+      HUNYUAN_SECRET_KEY: "${HUNYUAN_SECRET_KEY:-your_hunyuan_secret_key_here}"
+      
+      # 月之暗面Kimi配置
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:-your_moonshot_api_key_here}"
+    volumes:
+      - .:/app
+      - go_cache:/go/pkg/mod
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    networks:
+      - aigateway-network
+
+  # Python 模型服务
+  python-models:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+      target: development
+    container_name: aigateway-python-dev
+    ports:
+      - "5000:5000"
+      - "8888:8888"  # Jupyter notebook
+    environment:
+      # HuggingFace 配置
+      HF_ENDPOINT: https://hf-mirror.com
+      HF_HOME: /app/.cache/huggingface
+      
+      # 模型配置
+      MODEL_CACHE_DIR: /app/.cache/models
+      TRANSFORMERS_CACHE: /app/.cache/transformers
+      
+      # 服务配置
+      FLASK_ENV: development
+      FLASK_DEBUG: 1
+      
+      # 性能配置
+      WORKERS: 2
+      THREADS: 4
+    volumes:
+      - ./python:/app
+      - model_cache:/app/.cache
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - aigateway-network
+
+  # React 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: development
+    container_name: aigateway-frontend-dev
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_WS_URL: ws://localhost:8080/ws
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - aigateway-network
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: aigateway-nginx-dev
+    ports:
+      - "80:80"
+    volumes:
+      - ./configs/nginx-dev.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - aigateway-network
+
+# ==========================================
+# 网络配置
+# ==========================================
+networks:
+  aigateway-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ==========================================
+# 存储卷配置
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  consul_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  model_cache:
+    driver: local
+  go_cache:
+    driver: local
+  frontend_node_modules:
+    driver: local
