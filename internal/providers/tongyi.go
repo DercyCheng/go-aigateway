@@ -11,6 +11,7 @@ import (
 )
 
 // TongyiProvider 通义千问提供商
+// 同时也是"第三方模型"的具体实现，处理阿里百炼(DashScope)的所有模型
 type TongyiProvider struct {
 	config *ProviderConfig
 	client *http.Client
@@ -18,6 +19,7 @@ type TongyiProvider struct {
 }
 
 // NewTongyiProvider 创建通义千问提供商
+// 这个provider处理所有阿里百炼(DashScope)的"第三方模型"
 func NewTongyiProvider(config *ProviderConfig) *TongyiProvider {
 	client := &http.Client{
 		Timeout: config.Timeout,

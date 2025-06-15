@@ -58,9 +58,9 @@ services:
       - LOCAL_MODEL_SIZE=small
       - PYTHON_PATH=python
       
-      # Third-party model configuration
+      # Third-party model configuration (阿里百炼/Alibaba DashScope)
       - THIRD_PARTY_MODEL_ENABLED=${THIRD_PARTY_MODEL_ENABLED:-false}
-      - BAILIAN_API_KEY=${BAILIAN_API_KEY:-}
+      - BAILIAN_API_KEY=${BAILIAN_API_KEY:-}  # 阿里百炼API密钥
       
       # Monitoring
       - MONITORING_ENABLED=true

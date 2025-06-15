@@ -1,5 +1,11 @@
 package main
 
+// AI Gateway - 智能AI网关
+//
+// 支持本地模型和第三方模型 (阿里百炼/Alibaba DashScope)
+// 第三方模型通过阿里云DashScope API提供云端AI服务
+// 详见: docs/THIRD_PARTY_MODELS.md
+
 import (
 	"context"
 	"go-aigateway/internal/autoscaler"

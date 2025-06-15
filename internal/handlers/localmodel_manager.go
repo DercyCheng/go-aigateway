@@ -68,11 +68,11 @@ func (h *LocalModelManagerHandler) DownloadModel() gin.HandlerFunc {
 			return
 		}
 
-		// Check if this is a third-party model
+		// Check if this is a third-party model (阿里百炼)
 		if h.isThirdPartyModel(modelID) {
-			// Third-party models don't need to be downloaded
+			// Third-party models (阿里百炼) don't need to be downloaded - they run on Alibaba Cloud
 			c.JSON(http.StatusOK, gin.H{
-				"message": "Third-party model is already available",
+				"message": "Third-party model (阿里百炼) is already available",
 			})
 			return
 		}
@@ -101,12 +101,12 @@ func (h *LocalModelManagerHandler) StartModel() gin.HandlerFunc {
 			return
 		}
 
-		// Check if this is a third-party model
+		// Check if this is a third-party model (阿里百炼)
 		if h.isThirdPartyModel(modelID) {
-			// For third-party models, we don't need to "start" them as they're cloud-based
+			// For third-party models (阿里百炼), we don't need to "start" them as they're cloud-based
 			// Just return success to indicate the model is available
 			c.JSON(http.StatusOK, gin.H{
-				"message": "Third-party model is available",
+				"message": "Third-party model (阿里百炼) is available",
 			})
 			return
 		}
@@ -157,12 +157,12 @@ func (h *LocalModelManagerHandler) StopModel() gin.HandlerFunc {
 			return
 		}
 
-		// Check if this is a third-party model
+		// Check if this is a third-party model (阿里百炼)
 		if h.isThirdPartyModel(modelID) {
-			// For third-party models, we don't need to "stop" them as they're cloud-based
+			// For third-party models (阿里百炼), we don't need to "stop" them as they're cloud-based
 			// Just return success
 			c.JSON(http.StatusOK, gin.H{
-				"message": "Third-party model is always available",
+				"message": "Third-party model (阿里百炼) is always available",
 			})
 			return
 		}
@@ -231,9 +231,9 @@ func (h *LocalModelManagerHandler) GetModelStatus() gin.HandlerFunc {
 			return
 		}
 
-		// Check if this is a third-party model
+		// Check if this is a third-party model (阿里百炼)
 		if h.isThirdPartyModel(modelID) {
-			// Third-party models are always "available" when third-party is enabled
+			// Third-party models (阿里百炼) are always "available" when third-party is enabled
 			if h.config.ThirdParty.Enabled {
 				c.JSON(http.StatusOK, gin.H{
 					"status": "available",
@@ -261,23 +261,10 @@ func (h *LocalModelManagerHandler) GetModelStatus() gin.HandlerFunc {
 	}
 }
 
-// isThirdPartyModel checks if the given model ID is a third-party model
+// isThirdPartyModel checks if the given model ID is a third-party model (阿里百炼)
 func (h *LocalModelManagerHandler) isThirdPartyModel(modelID string) bool {
-	// List of third-party model IDs from 阿里百炼
-	thirdPartyModels := []string{
-		"qwen-turbo",
-		"qwen-plus",
-		"qwen-max",
-		"text-embedding-v1",
-		"text-embedding-v2",
-	}
-
-	for _, model := range thirdPartyModels {
-		if model == modelID {
-			return true
-		}
-	}
-	return false
+	// Use the centralized third-party model information
+	return IsThirdPartyModel(modelID)
 }
 
 // RegisterLocalModelManagerRoutes registers the local model manager routes

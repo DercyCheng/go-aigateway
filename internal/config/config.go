@@ -143,17 +143,18 @@ type LocalModelConfig struct {
 	LogResponses  bool
 	EnabledModels []string // List of enabled local models
 
-	// Third-party model support
+	// Third-party model support (阿里百炼/Alibaba DashScope)
 	ThirdParty ThirdPartyModelConfig
 }
 
 // ThirdPartyModelConfig represents configuration for third-party AI models
+// Currently supports 阿里百炼 (Alibaba DashScope/通义千问) cloud-based models
 type ThirdPartyModelConfig struct {
-	Enabled      bool   // Enable third-party models
-	Provider     string // Provider name: "alililian", "openai", "anthropic"
-	APIKey       string // API key for the third-party service
-	BaseURL      string // Custom base URL for the API
-	DefaultModel string // Default model to use for requests
+	Enabled      bool   // Enable third-party models (阿里百炼)
+	Provider     string // Provider name: "alililian" (阿里百炼), "openai", "anthropic"
+	APIKey       string // API key for the third-party service (DashScope API Key)
+	BaseURL      string // Custom base URL for the API (DashScope compatible API endpoint)
+	DefaultModel string // Default model to use for requests (e.g., qwen-turbo)
 }
 
 func New() *Config {
