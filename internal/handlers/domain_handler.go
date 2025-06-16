@@ -89,23 +89,14 @@ func NewDomainHandler() *DomainHandler {
 
 // GetDomains returns all domains
 func (h *DomainHandler) GetDomains(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    h.domains,
-	})
+	SuccessResponse(c, h.domains)
 }
 
 // CreateDomain creates a new domain
 func (h *DomainHandler) CreateDomain(c *gin.Context) {
 	var req Domain
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error": gin.H{
-				"code":    "INVALID_REQUEST",
-				"message": "Invalid request body",
-			},
-		})
+		ValidationErrorResponse(c, "Invalid request body", err.Error())
 		return
 	}
 
@@ -117,9 +108,10 @@ func (h *DomainHandler) CreateDomain(c *gin.Context) {
 
 	h.domains = append(h.domains, req)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"data":    req,
+	c.JSON(http.StatusCreated, StandardResponse{
+		Success:   true,
+		Data:      req,
+		Timestamp: time.Now().Unix(),
 	})
 }
 

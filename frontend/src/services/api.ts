@@ -118,16 +118,16 @@ class ApiService {
         return this.request('/local/models');
     }
 
-    // Authentication
+    // Authentication - updated to use standardized paths
     async login(username: string, password: string) {
-        return this.request('/auth/login', {
+        return this.request('/api/v1/auth/login', {
             method: 'POST',
             body: JSON.stringify({ username, password }),
         });
     }
 
     async createApiKey(name: string, permissions: any = {}) {
-        return this.request('/admin/api-keys', {
+        return this.request('/api/v1/admin/api-keys', {
             method: 'POST',
             body: JSON.stringify({ name, permissions }),
             headers: {
@@ -137,7 +137,7 @@ class ApiService {
     }
 
     async getApiKeys() {
-        return this.request('/admin/api-keys', {
+        return this.request('/api/v1/admin/api-keys', {
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
             },
@@ -305,6 +305,45 @@ class ApiService {
     async renewDomainCertificate(domainId: string) {
         return this.request(`/api/v1/domains/${domainId}/renew-certificate`, {
             method: 'POST',
+        });
+    }
+
+    // Cloud services management (standardized paths)
+    async getCloudServices() {
+        return this.request('/api/v1/cloud/services');
+    }
+
+    async getCloudServiceHealth(serviceName: string) {
+        return this.request(`/api/v1/cloud/services/${serviceName}/health`);
+    }
+
+    async scaleCloudService(serviceName: string, replicas: number) {
+        return this.request(`/api/v1/cloud/services/${serviceName}/scale`, {
+            method: 'POST',
+            body: JSON.stringify({ replicas }),
+        });
+    }
+
+    async getCloudServiceMetrics(serviceName: string, start?: string, end?: string) {
+        const params = new URLSearchParams();
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+
+        return this.request(`/api/v1/cloud/services/${serviceName}/metrics?${params.toString()}`);
+    }
+
+    async getCloudServiceLogs(serviceName: string, start?: string, end?: string) {
+        const params = new URLSearchParams();
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+
+        return this.request(`/api/v1/cloud/services/${serviceName}/logs?${params.toString()}`);
+    }
+
+    async updateCloudServiceConfig(serviceName: string, config: any) {
+        return this.request(`/api/v1/cloud/services/${serviceName}/config`, {
+            method: 'PUT',
+            body: JSON.stringify(config),
         });
     }
 }

@@ -26,15 +26,18 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 	// Metrics endpoint (no auth required)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	// Standardized API v1 group for management APIs
+	apiV1 := r.Group("/api/v1")
+
 	// Authentication endpoints (no auth required for login)
-	auth := r.Group("/auth")
+	auth := apiV1.Group("/auth")
 	{
 		auth.POST("/login", handlers.Login(localAuth))
 		auth.POST("/refresh", handlers.RefreshToken(localAuth))
 	}
 
 	// API management endpoints (admin auth required)
-	admin := r.Group("/admin")
+	admin := apiV1.Group("/admin")
 	admin.Use(middleware.LocalAuth(localAuth, "admin"))
 	{
 		admin.POST("/api-keys", handlers.CreateAPIKey(localAuth))
@@ -43,7 +46,24 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 		admin.PUT("/api-keys/:id", handlers.UpdateAPIKey(localAuth))
 	}
 
-	// API routes with API key authentication for external clients
+	// Backward compatibility - Legacy authentication endpoints (deprecated but supported)
+	legacyAuth := r.Group("/auth")
+	{
+		legacyAuth.POST("/login", handlers.Login(localAuth))
+		legacyAuth.POST("/refresh", handlers.RefreshToken(localAuth))
+	}
+
+	// Backward compatibility - Legacy admin endpoints (deprecated but supported)
+	legacyAdmin := r.Group("/admin")
+	legacyAdmin.Use(middleware.LocalAuth(localAuth, "admin"))
+	{
+		legacyAdmin.POST("/api-keys", handlers.CreateAPIKey(localAuth))
+		legacyAdmin.GET("/api-keys", handlers.ListAPIKeys(localAuth))
+		legacyAdmin.DELETE("/api-keys/:id", handlers.DeleteAPIKey(localAuth))
+		legacyAdmin.PUT("/api-keys/:id", handlers.UpdateAPIKey(localAuth))
+	}
+
+	// OpenAI-compatible API routes with API key authentication for external clients
 	api := r.Group("/v1")
 	api.Use(middleware.APIKeyAuth(cfg))
 
@@ -70,133 +90,151 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, localAuth *security.LocalAut
 	}
 }
 
-// SetupCloudRoutes sets up cloud management routes
+// SetupCloudRoutes sets up standardized cloud management routes
 func SetupCloudRoutes(r *gin.Engine, integrator *cloud.CloudIntegrator) {
 	if integrator == nil {
 		return
 	}
 
-	// Cloud management routes
-	cloudGroup := r.Group("/cloud")
+	// Define common handlers for reuse
+	getServicesHandler := func(c *gin.Context) {
+		services, err := integrator.GetServices()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"services": services})
+	}
+
+	getServiceHealthHandler := func(c *gin.Context) {
+		serviceName := c.Param("name")
+		health, err := integrator.GetServiceHealth(serviceName)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, health)
+	}
+
+	scaleServiceHandler := func(c *gin.Context) {
+		serviceName := c.Param("name")
+		var req struct {
+			Replicas int `json:"replicas"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := integrator.ScaleService(serviceName, req.Replicas); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"message": "Service scaled successfully"})
+	}
+
+	getServiceMetricsHandler := func(c *gin.Context) {
+		serviceName := c.Param("name")
+		var timeRange cloud.TimeRange
+
+		// Parse start time
+		if startStr := c.Query("start"); startStr != "" {
+			if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
+				timeRange.Start = startTime
+			} else {
+				timeRange.Start = time.Now().Add(-1 * time.Hour)
+			}
+		} else {
+			timeRange.Start = time.Now().Add(-1 * time.Hour)
+		}
+
+		// Parse end time
+		if endStr := c.Query("end"); endStr != "" {
+			if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
+				timeRange.End = endTime
+			} else {
+				timeRange.End = time.Now()
+			}
+		} else {
+			timeRange.End = time.Now()
+		}
+
+		metrics, err := integrator.GetMetrics(serviceName, timeRange)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, metrics)
+	}
+
+	getServiceLogsHandler := func(c *gin.Context) {
+		serviceName := c.Param("name")
+		var timeRange cloud.TimeRange
+
+		// Parse start time
+		if startStr := c.Query("start"); startStr != "" {
+			if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
+				timeRange.Start = startTime
+			} else {
+				timeRange.Start = time.Now().Add(-1 * time.Hour)
+			}
+		} else {
+			timeRange.Start = time.Now().Add(-1 * time.Hour)
+		}
+
+		// Parse end time
+		if endStr := c.Query("end"); endStr != "" {
+			if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
+				timeRange.End = endTime
+			} else {
+				timeRange.End = time.Now()
+			}
+		} else {
+			timeRange.End = time.Now()
+		}
+
+		logs, err := integrator.GetLogs(serviceName, timeRange)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"logs": logs})
+	}
+
+	updateServiceConfigHandler := func(c *gin.Context) {
+		serviceName := c.Param("name")
+		var config map[string]interface{}
+		if err := c.ShouldBindJSON(&config); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := integrator.UpdateConfiguration(serviceName, config); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"message": "Configuration updated successfully"})
+	}
+
+	// Standardized cloud management routes under /api/v1
+	cloudGroup := r.Group("/api/v1/cloud")
 	{
-		// Service management
-		cloudGroup.GET("/services", func(c *gin.Context) {
-			services, err := integrator.GetServices()
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"services": services})
-		})
+		cloudGroup.GET("/services", getServicesHandler)
+		cloudGroup.GET("/services/:name/health", getServiceHealthHandler)
+		cloudGroup.POST("/services/:name/scale", scaleServiceHandler)
+		cloudGroup.GET("/services/:name/metrics", getServiceMetricsHandler)
+		cloudGroup.GET("/services/:name/logs", getServiceLogsHandler)
+		cloudGroup.PUT("/services/:name/config", updateServiceConfigHandler)
+	}
 
-		cloudGroup.GET("/services/:name/health", func(c *gin.Context) {
-			serviceName := c.Param("name")
-			health, err := integrator.GetServiceHealth(serviceName)
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, health)
-		})
-
-		cloudGroup.POST("/services/:name/scale", func(c *gin.Context) {
-			serviceName := c.Param("name")
-			var req struct {
-				Replicas int `json:"replicas"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-
-			if err := integrator.ScaleService(serviceName, req.Replicas); err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"message": "Service scaled successfully"})
-		})
-
-		cloudGroup.GET("/services/:name/metrics", func(c *gin.Context) {
-			serviceName := c.Param("name")
-			var timeRange cloud.TimeRange
-
-			// Parse start time
-			if startStr := c.Query("start"); startStr != "" {
-				if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
-					timeRange.Start = startTime
-				} else {
-					timeRange.Start = time.Now().Add(-1 * time.Hour)
-				}
-			} else {
-				timeRange.Start = time.Now().Add(-1 * time.Hour)
-			}
-
-			// Parse end time
-			if endStr := c.Query("end"); endStr != "" {
-				if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
-					timeRange.End = endTime
-				} else {
-					timeRange.End = time.Now()
-				}
-			} else {
-				timeRange.End = time.Now()
-			}
-
-			metrics, err := integrator.GetMetrics(serviceName, timeRange)
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, metrics)
-		})
-
-		cloudGroup.GET("/services/:name/logs", func(c *gin.Context) {
-			serviceName := c.Param("name")
-			var timeRange cloud.TimeRange
-
-			// Parse start time
-			if startStr := c.Query("start"); startStr != "" {
-				if startTime, err := time.Parse(time.RFC3339, startStr); err == nil {
-					timeRange.Start = startTime
-				} else {
-					timeRange.Start = time.Now().Add(-1 * time.Hour)
-				}
-			} else {
-				timeRange.Start = time.Now().Add(-1 * time.Hour)
-			}
-
-			// Parse end time
-			if endStr := c.Query("end"); endStr != "" {
-				if endTime, err := time.Parse(time.RFC3339, endStr); err == nil {
-					timeRange.End = endTime
-				} else {
-					timeRange.End = time.Now()
-				}
-			} else {
-				timeRange.End = time.Now()
-			}
-
-			logs, err := integrator.GetLogs(serviceName, timeRange)
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"logs": logs})
-		})
-
-		cloudGroup.PUT("/services/:name/config", func(c *gin.Context) {
-			serviceName := c.Param("name")
-			var config map[string]interface{}
-			if err := c.ShouldBindJSON(&config); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-
-			if err := integrator.UpdateConfiguration(serviceName, config); err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"message": "Configuration updated successfully"})
-		})
+	// Backward compatibility - Legacy cloud routes (deprecated but supported)
+	legacyCloudGroup := r.Group("/cloud")
+	{
+		legacyCloudGroup.GET("/services", getServicesHandler)
+		legacyCloudGroup.GET("/services/:name/health", getServiceHealthHandler)
+		legacyCloudGroup.POST("/services/:name/scale", scaleServiceHandler)
+		legacyCloudGroup.GET("/services/:name/metrics", getServiceMetricsHandler)
+		legacyCloudGroup.GET("/services/:name/logs", getServiceLogsHandler)
+		legacyCloudGroup.PUT("/services/:name/config", updateServiceConfigHandler)
 	}
 }
